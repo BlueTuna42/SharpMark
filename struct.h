@@ -6,6 +6,7 @@
 #include <string>
 #include <cmath>
 #include <fftw3.h>
+#include <cstdint>
 
 #define PATH_MAX 256
 

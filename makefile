@@ -1,32 +1,42 @@
-# C++ compiler
 CXX = g++
+CC = gcc
+CXXFLAGS = -Wall -std=c++17 -O3
+CFLAGS = -Wall -O3
+LDFLAGS = -lsfml-graphics -lsfml-window -lsfml-system -lfftw3f -lraw -lm -ldl
 
-# Compiler flags: show all warnings, use C++14 standard (needed for std::make_unique), and enable optimization
-CXXFLAGS = -Wall -std=c++14 -O2
+# Папки
+OBJ_DIR = obj
+BIN_NAME = focus_analyzer_gui
 
-# Linker flags: link fftw3 (floating point version) and libraw libraries
-LDFLAGS = -lfftw3f -lraw
+# Исходники
+SRCS_CPP = main.cpp FFT.cpp bmp.cpp scan.cpp XMP_tools.cpp
+SRCS_C = tinyfiledialogs.c
 
-# Project source files
-SRCS = main.cpp FFT.cpp bmp.cpp scan.cpp XMP_tools.cpp
+# Объектные файлы теперь живут в папке obj/
+OBJS = $(addprefix $(OBJ_DIR)/, $(SRCS_CPP:.cpp=.o) $(SRCS_C:.c=.o))
 
-# Object files (replace .cpp with .o)
-OBJS = $(SRCS:.cpp=.o)
+all: $(OBJ_DIR) $(BIN_NAME)
 
-# Output executable name
-EXEC = focus_checker
+# Создание папки для объектных файлов
+$(OBJ_DIR):
+	mkdir -p $(OBJ_DIR)
 
-# Default rule
-all: $(EXEC)
-
-# Rule to build the final executable
-$(EXEC): $(OBJS)
+# Сборка финала
+$(BIN_NAME): $(OBJS)
 	$(CXX) $(OBJS) -o $@ $(LDFLAGS)
 
-# Rule to compile each .cpp file into an .o file
-%.o: %.cpp
+# Компиляция C++
+$(OBJ_DIR)/%.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-# Rule to clean up generated files
+# Компиляция C (tinyfiledialogs)
+$(OBJ_DIR)/%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Очистка всего лишнего
 clean:
-	rm -f $(OBJS) $(EXEC)
+	rm -rf $(OBJ_DIR)
+	rm -f $(BIN_NAME) focus_checker BlurryList.txt
+	@echo "Cleaned up!"
+
+.PHONY: all clean
