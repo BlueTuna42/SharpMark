@@ -69,3 +69,7 @@ ImageLib
 *BlurryList.txt
 *.json
 *.fftw
+
+# Исполняемые файлы
+focus_analyzer_gui
+focus_checker

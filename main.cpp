@@ -4,8 +4,9 @@
 #include <string>
 #include <filesystem>
 #include <cmath>
+#include <fstream>
+#include <chrono>
 
-#include "struct.h"
 #include "FFT.h"
 #include "bmp.h"
 #include "scan.h"
@@ -42,7 +43,6 @@ struct StyledButton {
         rect.setFillColor(Theme::Accent);
         rect.setPosition(pos);
         
-        // Центрируем текст
         text.setPosition(pos.x + (200 - tr.width) / 2.0f, pos.y + (45 - tr.height) / 2.0f - 5);
     }
 
@@ -69,24 +69,25 @@ public:
     bool checkFocus(const std::string& f) {
         auto img = ImageIO::readImage(f);
         if (!img) return false;
-        auto fft = fftProcessor.forwardFFT(*img);
+
+        // Оптимизация из ветки main: конвертация в Grayscale ускоряет FFT в 3 раза
+        auto gray = ImageIO::convertToGrayscale(*img);
+        auto fft = fftProcessor.forwardFFT(*gray);
         fftProcessor.shift(*fft);
         double ER = fftProcessor.energyRatio(*fft);
         
-        // Запись рейтинга в XMP
         XMPTools::writeXmpRating(f, (ER >= focusConst) ? 5 : 1);
         return ER >= focusConst;
     }
 };
 
+// Функция отрисовки кольцевой диаграммы (из твоего GUI Work)
 void drawAnalysisChart(sf::RenderWindow& window, sf::Vector2f pos, int sharp, int blurry, sf::Font& font) {
-    float total = sharp + blurry;
+    float total = (float)sharp + blurry;
     float percentage = (total > 0) ? ((float)sharp / total) : 0.0f;
-    
     float radius = 60.f;
     float thickness = 12.f;
 
-    // 1. Фон кольца — Красный (Blurry)
     sf::CircleShape background(radius);
     background.setOrigin(radius, radius);
     background.setPosition(pos);
@@ -95,12 +96,10 @@ void drawAnalysisChart(sf::RenderWindow& window, sf::Vector2f pos, int sharp, in
     background.setOutlineColor(Theme::Blurry);
     window.draw(background);
 
-    // 2. Сектор прогресса — Зеленый (Sharp)
     if (total > 0 && sharp > 0) {
         sf::VertexArray sector(sf::TriangleFan, 40);
         sector[0].position = pos;
         sector[0].color = Theme::Sharp;
-
         float angleLimit = percentage * 360.f;
         for (int i = 1; i < 40; ++i) {
             float angle = (i - 1) * angleLimit / 38.f - 90.f;
@@ -110,15 +109,13 @@ void drawAnalysisChart(sf::RenderWindow& window, sf::Vector2f pos, int sharp, in
         }
         window.draw(sector);
 
-        // Маска центра (дырка бублика)
         sf::CircleShape mask(radius - thickness);
         mask.setOrigin(radius - thickness, radius - thickness);
         mask.setPosition(pos);
-        mask.setFillColor(Theme::Bg); // ИСПРАВЛЕНО: было Background, стало Bg
+        mask.setFillColor(Theme::Bg);
         window.draw(mask);
     }
-
-    // 3. Текст с % в центре
+    
     sf::Text pctText(std::to_string((int)(percentage * 100)) + "%", font, 20);
     pctText.setFillColor(sf::Color::White);
     sf::FloatRect b = pctText.getLocalBounds();
@@ -141,16 +138,8 @@ int main() {
     sidebar.setFillColor(Theme::Sidebar);
 
     StyledButton analyzeButton("Analyze Folder", font, {25, 30});
-    
-    sf::Text statsTitle("Statistics", font, 22);
-    statsTitle.setPosition(35, 110);
-    statsTitle.setFillColor(Theme::Text);
-
-    sf::Text statsContent("No data", font, 16);
-    statsContent.setPosition(35, 150);
-    statsContent.setFillColor(sf::Color(180, 180, 180));
-
     FocusCheckerApp app;
+    
     struct ResultEntry { std::string name; bool isSharp; };
     std::vector<ResultEntry> results;
 
@@ -167,58 +156,36 @@ int main() {
             
             if (analyzeButton.isClicked(event)) {
                 const char* path = tinyfd_selectFolderDialog("Select Folder", "");
-
                 if (path) {
-                    results.clear();
                     auto files = Scanner::scanBmpFiles(path);
                     totalFiles = files.size();
+                    if (totalFiles == 0) continue;
 
-                    if (totalFiles == 0) {
-                        results.clear();
-                        isAnalyzing = false;
-                        continue; // ← выходим, ничего не анализируем
-                    }
-
+                    results.clear();
                     processedFiles = 0;
-                    progress = 0.f;
                     isAnalyzing = true;
 
                     for (const auto& f : files) {
+                        // Опрос событий, чтобы окно не "зависало" (из GUI Work)
                         sf::Event e;
-                        while (window.pollEvent(e)) {
-                            if (e.type == sf::Event::Closed) {
-                                window.close();
-                                return 0;
-                            }
-                        }
-                        // Обновляем прогресс
+                        while (window.pollEvent(e)) { if (e.type == sf::Event::Closed) window.close(); }
+
                         processedFiles++;
-                        progress = (totalFiles > 0) 
-                            ? static_cast<float>(processedFiles) / totalFiles 
-                            : 0.f;
-                        // Анализ
+                        progress = static_cast<float>(processedFiles) / totalFiles;
+                        
                         bool res = app.checkFocus(f);
                         results.push_back({ fs::path(f).filename().string(), res });
 
-                        // --- ХИТРОСТЬ ДЛЯ ОБНОВЛЕНИЯ GUI ---
-                        // Отрисовываем полоску прямо во время цикла, чтобы она двигалась
+                        // Отрисовка прогресса в реальном времени
                         window.clear(Theme::Bg);
                         window.draw(sidebar);
                         analyzeButton.draw(window);
                         
-                        // Рисуем временный индикатор загрузки
                         sf::RectangleShape progressBar(sf::Vector2f(200.f * progress, 10.f));
                         progressBar.setPosition(25.f, 85.f);
                         progressBar.setFillColor(Theme::Accent);
                         window.draw(progressBar);
-
-                        sf::Text loadingText("Processing: " + std::to_string(processedFiles) + "/" + std::to_string(totalFiles), font, 14);
-                        loadingText.setPosition(25.f, 100.f);
-                        loadingText.setFillColor(Theme::Text);
-                        window.draw(loadingText);
-
                         window.display(); 
-                        // ----------------------------------
                     }
                     isAnalyzing = false;
                 }
@@ -226,71 +193,31 @@ int main() {
         }
 
         analyzeButton.update(mousePos);
-
         window.clear(Theme::Bg);
         window.draw(sidebar);
         analyzeButton.draw(window);
-        //window.draw(statsTitle);
-        //window.draw(statsContent);
 
-    // --- СЕКЦИЯ ЛЕВОЙ ПАНЕЛИ (СТАТИСТИКА ИЛИ ПРОГРЕСС) ---
-    if (isAnalyzing) {
-        // 1. Рисуем подложку прогресс-бара
-        sf::RectangleShape barBg({200.f, 20.f});
-        barBg.setPosition(25.f, 150.f);
-        barBg.setFillColor(sf::Color(50, 50, 50));
-        window.draw(barBg);
+        if (!isAnalyzing && !results.empty()) {
+            int sharpCount = 0;
+            for (const auto& res : results) if (res.isSharp) sharpCount++;
+            int blurryCount = static_cast<int>(results.size()) - sharpCount;
 
-        // 2. Рисуем заполнение прогресс-бара
-        sf::RectangleShape barFill({200.f * progress, 20.f});
-        barFill.setPosition(25.f, 150.f);
-        barFill.setFillColor(Theme::Accent);
-        window.draw(barFill);
+            drawAnalysisChart(window, sf::Vector2f(130.f, 150.f), sharpCount, blurryCount, font);
 
-        // 3. Текст "Processing..."
-        sf::Text loadingText("Processing: " + std::to_string(processedFiles) + "/" + std::to_string(totalFiles), font, 16);
-        loadingText.setPosition(25.f, 180.f);
-        loadingText.setFillColor(Theme::Text);
-        window.draw(loadingText);
+            // Список файлов справа
+            const float LIST_START_X = 280.f;
+            for (size_t i = 0; i < results.size() && i < 20; ++i) {
+                sf::CircleShape ind(6.f);
+                ind.setPosition(LIST_START_X, 40.f + i * 25.f + 5.f);
+                ind.setFillColor(results[i].isSharp ? Theme::Sharp : Theme::Blurry);
+                window.draw(ind);
 
-    } else if (!results.empty()) {
-        // Если анализ завершен — рисуем твою кольцевую диаграмму
-        int sharpCount = 0;
-        for (const auto& res : results) if (res.isSharp) sharpCount++;
-        int blurryCount = static_cast<int>(results.size()) - sharpCount;
-
-        drawAnalysisChart(window, sf::Vector2f(130.f, 150.f), sharpCount, blurryCount, font);
-
-        sf::Text statsText("Sharp: " + std::to_string(sharpCount) + 
-                        "\nBlurry: " + std::to_string(blurryCount), font, 16);
-        statsText.setPosition(80.f, 230.f);
-        statsText.setFillColor(Theme::Text);
-        window.draw(statsText);
-    }
-
-    // --- СЕКЦИЯ СПИСКА ФАЙЛОВ (СПРАВА) ---
-    const float LIST_START_X = 280.f;
-    const float LIST_START_Y = 40.f;
-    const float ROW_HEIGHT   = 25.f;
-
-    for (size_t i = 0; i < results.size() && i < 20; ++i) {
-        float currentY = LIST_START_Y + i * ROW_HEIGHT;
-
-        // Индикатор (цветная точка)
-        sf::CircleShape indicator(6.f);
-        indicator.setPosition(LIST_START_X, currentY + 5.f);
-        indicator.setFillColor(results[i].isSharp ? Theme::Sharp : Theme::Blurry);
-        
-        // Имя файла
-        sf::Text fileName(results[i].name, font, 16);
-        fileName.setPosition(LIST_START_X + 20.f, currentY);
-        fileName.setFillColor(Theme::Text);
-
-        window.draw(indicator);
-        window.draw(fileName);
-    }
-
-    window.display();
+                sf::Text name(results[i].name, font, 16);
+                name.setPosition(LIST_START_X + 20.f, 40.f + i * 25.f);
+                window.draw(name);
+            }
+        }
+        window.display();
     }
     return 0;
 }
