@@ -52,6 +52,7 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+build
 
 # Images
 *.jpg
@@ -64,6 +65,7 @@ dkms.conf
 *.CR2
 *.xmp
 ImageLib
+Images
 
 # Output files
 *BlurryList.txt

@@ -1,25 +1,24 @@
 #include "scan.h"
-#include <glob.h>
+#include <filesystem>
+
+namespace fs = std::filesystem;
 
 std::vector<std::string> Scanner::scanFiles(const std::string& path) {
-    glob_t g;
-    // List of all supported image extensions
-    std::vector<std::string> exts = {
-        "*.bmp", "*.jpg", "*.png", "*.jpeg", 
-        "*.ARW", "*.DNG", "*.CR2", "*.NEF", "*.RW2", "*.RAF"
-    };
     std::vector<std::string> res;
-    
-    // Find files matching the extensions
-    for (size_t i = 0; i < exts.size(); ++i) {
-        std::string pattern = path + "/" + exts[i];
-        glob(pattern.c_str(), (i == 0 ? 0 : GLOB_APPEND), nullptr, &g);
+    std::vector<std::string> target_exts = {".bmp", ".jpg", ".png", ".jpeg", ".arw", ".dng", ".cr2", ".nef", ".rw2", ".raf"};
+
+    for (const auto& entry : fs::directory_iterator(path)) {
+        if (entry.is_regular_file()) {
+            std::string ext = entry.path().extension().string();
+            for(auto &c : ext) c = tolower(c);
+            
+            for(const auto& t_ext : target_exts) {
+                if(ext == t_ext) {
+                    res.push_back(entry.path().string());
+                    break;
+                }
+            }
+        }
     }
-    
-    for (size_t i = 0; i < g.gl_pathc; ++i) {
-        res.push_back(g.gl_pathv[i]);
-    }
-    
-    globfree(&g);
     return res;
 }
