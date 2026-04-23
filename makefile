@@ -1,10 +1,11 @@
 # Compiler and Flags
 CXX = g++
-CXXFLAGS = -Wall -std=c++14 -O2 -march=native
-LDFLAGS = -lfftw3f -lraw -lm
+
+CXXFLAGS = -Wall -std=c++14 -O2 -march=native `pkg-config --cflags gtk+-3.0`
+LDFLAGS = -lfftw3f -lraw -lm `pkg-config --libs gtk+-3.0`
 
 # Project Files
-SRCS = main.cpp FFT.cpp bmp.cpp scan.cpp XMP_tools.cpp
+SRCS = main.cpp FFT.cpp bmp.cpp scan.cpp XMP_tools.cpp gui.cpp
 OBJS = $(SRCS:.cpp=.o)
 EXEC = focus_checker
 
