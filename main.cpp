@@ -9,6 +9,7 @@
 #include "bmp.h"
 #include "scan.h"
 #include "XMP_tools.h"
+#include "gui.h"
 
 class FocusCheckerApp {
 private:
@@ -19,7 +20,7 @@ private:
 public:
     bool useHalfSize = true; // Adjustable parameter for RAW processing
 
-    void processFile(const std::string& file, std::ofstream& log) {
+    void processFile(const std::string& file, std::ofstream& log, VisualGUI& gui) {
 #ifdef DEBUG_BENCHMARK
         auto ts_read = std::chrono::high_resolution_clock::now();
 #endif
@@ -53,6 +54,8 @@ public:
             XMPTools::writeXmpRating(file, 5);
         }
 
+        gui.AddResult(file, isBlurry);
+
         // Lock the mutex before writing to the console and log file to prevent scrambling mixing up
         std::lock_guard<std::mutex> lock(output_mutex);
 
@@ -79,14 +82,16 @@ public:
 
 int main(int argc, char** argv) {
     std::string dirpath;
+    VisualGUI gui;
     
-    // Check if path is provided as argument or needs to be requested
     if (argc > 1) {
         dirpath = argv[1];
     } else {
-        std::cout << "Enter directory path: ";
-        if (!std::getline(std::cin, dirpath)) {
-            std::cerr << "Error reading input." << std::endl;
+        std::cout << "Waiting for directory selection in GUI..." << std::endl;
+        dirpath = gui.SelectDirectory();
+        
+        if (dirpath.empty()) {
+            std::cerr << "No directory selected or window closed." << std::endl;
             return 1;
         }
     }
@@ -95,41 +100,43 @@ int main(int argc, char** argv) {
     std::cout << "Found " << files.size() << " image file(s):" << std::endl;
 
     std::ofstream log("BlurryList.txt");
-    if (!log.is_open()) {
-        std::cerr << "Failed to open BlurryList.txt for writing." << std::endl;
-        return 1;
-    }
+        if (!log.is_open()) {
+            std::cerr << "Failed to open BlurryList.txt for writing." << std::endl;
+            return 1;
+        }
 
-    FocusCheckerApp app;
-    app.useHalfSize = true; 
+        FocusCheckerApp app;
+        app.useHalfSize = true; 
 
 #ifdef DEBUG_BENCHMARK
-    auto ts_total_start = std::chrono::high_resolution_clock::now();
+        auto ts_total_start = std::chrono::high_resolution_clock::now();
 #endif
 
-    // Vector to store futures for parallel execution
+        // Vector to store futures for parallel execution
     std::vector<std::future<void>> futures;
 
     // Launch processing
     for (const auto& f : files) {
-        futures.push_back(std::async(std::launch::async, [&app, &log, f]() {
-            app.processFile(f, log);
+        futures.push_back(std::async(std::launch::async, [&app, &log, &gui, f]() {
+            app.processFile(f, log, gui);
         }));
     }
 
-    // Wait for all processЫЫЫing threads to finish
+    // Wait for all processing threads to finish
     for (auto& fut : futures) {
         fut.wait();
     }
     
 #ifdef DEBUG_BENCHMARK
-    auto ts_total_end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double, std::milli> total_time = ts_total_end - ts_total_start;
-    std::cout << "\n========================================" << std::endl;
-    std::cout << "  [TOTAL] Directory processing time: " << total_time.count() << " ms" << std::endl;
-    std::cout << "========================================" << std::endl;
+        auto ts_total_end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> total_time = ts_total_end - ts_total_start;
+        std::cout << "\n========================================" << std::endl;
+        std::cout << "  [TOTAL] Directory processing time: " << total_time.count() << " ms" << std::endl;
+        std::cout << "========================================" << std::endl;
 #endif
 
     log.close();
+    gui.ShowFinished();
+    
     return 0;
 }

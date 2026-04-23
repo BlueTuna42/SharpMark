@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 project(FocusChecker)
 
-# Define ANSI escape sequences for colored output
+# Define ANSI escape sequences for colored output (works in most terminals)
 if(NOT WIN32 OR (DEFINED ENV{TERM} AND NOT "$ENV{TERM}" STREQUAL ""))
     string(ASCII 27 Esc)
     set(ColorReset "${Esc}[m")
@@ -9,44 +9,41 @@ if(NOT WIN32 OR (DEFINED ENV{TERM} AND NOT "$ENV{TERM}" STREQUAL ""))
     set(ColorGreen "${Esc}[32m")
     set(ColorBold  "${Esc}[1m")
 else()
-    # Fallback for Windows consoles that might not support ANSI
     set(ColorReset "")
     set(ColorRed   "")
     set(ColorGreen "")
     set(ColorBold  "")
 endif()
 
-# Use C++17 standard for std::filesystem support
+# Use C++17 for std::filesystem support
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Optimization flags for Release build
+# Default to Release build for performance (-O2)
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# Explicitly add -O2 and -march=native for performance (non-MSVC compilers)
+# Optimization flags for GCC/Clang
 if(NOT MSVC)
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O2 -march=native")
 endif()
 
-# Option to enable benchmark mode (disabled by default)
+# Debug benchmark option
 option(ENABLE_BENCHMARK "Enable debug benchmark output" OFF)
 if(ENABLE_BENCHMARK)
     add_definitions(-DDEBUG_BENCHMARK)
 endif()
 
-# Find Threads (cross-platform)
-find_package(Threads REQUIRED)
-
-# Try to find libraries using PkgConfig first (good for Linux)
+# Try to find libraries (Linux/vcpkg/MSYS2 approach)
 find_package(PkgConfig QUIET)
 if(PKG_CONFIG_FOUND)
     pkg_check_modules(FFTW3 IMPORTED_TARGET fftw3f)
     pkg_check_modules(LIBRAW IMPORTED_TARGET libraw)
+    pkg_check_modules(GTK3 IMPORTED_TARGET gtk+-3.0) # Добавлен поиск GTK3
 endif()
 
-# Fallback manual search if PkgConfig failed (better for Windows/Mac)
+# Manual search fallback (Common for Windows without pkg-config)
 if(NOT FFTW3_FOUND)
     find_path(FFTW3_INCLUDE_DIRS NAMES fftw3.h)
     find_library(FFTW3_LIBRARIES NAMES fftw3f)
@@ -63,40 +60,40 @@ if(NOT LIBRAW_FOUND)
     endif()
 endif()
 
-# Mandatory check: Stop if libraries are missing
+# Colored diagnostic messages
 if(NOT FFTW3_FOUND)
-    message(FATAL_ERROR "${ColorRed}${ColorBold}FFTW3 (float version) not found! Please install it.${ColorReset}")
+    message(FATAL_ERROR "${ColorRed}${ColorBold}FFTW3 (float) not found!${ColorReset}")
 else()
-    message(STATUS "${ColorGreen}FFTW3 (float version) found.${ColorReset}")
+    message(STATUS "${ColorGreen}FFTW3 found.${ColorReset}")
 endif()
 
 if(NOT LIBRAW_FOUND)
-    message(FATAL_ERROR "${ColorRed}${ColorBold}LibRaw not found! Please install it.${ColorReset}")
+    message(FATAL_ERROR "${ColorRed}${ColorBold}LibRaw not found!${ColorReset}")
 else()
     message(STATUS "${ColorGreen}LibRaw found.${ColorReset}")
 endif()
 
-# Check for exiftool (runtime dependency)
-find_program(EXIFTOOL_EXECUTABLE exiftool)
-if(NOT EXIFTOOL_EXECUTABLE)
-    message(WARNING "${ColorRed}${ColorBold}exiftool not found in PATH! Rating features will fail at runtime.${ColorReset}")
+if(NOT GTK3_FOUND)
+    message(FATAL_ERROR "${ColorRed}${ColorBold}GTK3 not found! Please install it (e.g., libgtk-3-dev).${ColorReset}")
 else()
-    message(STATUS "${ColorGreen}exiftool found.${ColorReset}")
+    message(STATUS "${ColorGreen}GTK3 found.${ColorReset}")
 endif()
 
-# List of source files
+# Source files
 set(SOURCES
     main.cpp
     FFT.cpp
     bmp.cpp
     scan.cpp
     XMP_tools.cpp
+    gui.cpp
 )
 
-# Create executable
 add_executable(focus_checker ${SOURCES})
 
-# Configure include directories
+# Linking
+target_include_directories(focus_checker PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 if(TARGET PkgConfig::FFTW3)
     target_link_libraries(focus_checker PRIVATE PkgConfig::FFTW3)
 else()
@@ -111,10 +108,11 @@ else()
     target_link_libraries(focus_checker PRIVATE ${LIBRAW_LIBRARIES})
 endif()
 
-target_include_directories(focus_checker PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(focus_checker PRIVATE Threads::Threads)
+if(TARGET PkgConfig::GTK3)
+    target_link_libraries(focus_checker PRIVATE PkgConfig::GTK3)
+endif()
 
-# Math library link for Unix systems
+target_link_libraries(focus_checker PRIVATE Threads::Threads)
 if(UNIX)
     target_link_libraries(focus_checker PRIVATE m)
 endif()
