@@ -84,10 +84,20 @@ endif()
 # Source files
 set(SOURCES
     main.cpp
+    gui/window/app_style.cpp
     FFT.cpp
     bmp.cpp
+    gui/viewer/image_viewer.cpp
+    gui/window/main_window_builder.cpp
+    gui/utils/path_utils.cpp
+    gui/actions/delete_blurry_action.cpp
+    gui/actions/photo_trash.cpp
     scan.cpp
     XMP_tools.cpp
+    gui/viewer/preview_loader.cpp
+    gui/results/result_list_view.cpp
+    gui/results/result_store.cpp
+    gui/status/progress_summary.cpp
     gui.cpp
 )
 

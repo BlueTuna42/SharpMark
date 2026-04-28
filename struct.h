@@ -7,8 +7,6 @@
 #include <cmath>
 #include <fftw3.h>
 
-#define PATH_MAX 256
-
 class GrayscaleImage {
 public:
     int width;
