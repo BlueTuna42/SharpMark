@@ -1,7 +1,7 @@
 #ifndef LAPLACIAN_H 
 #define LAPLACIAN_H
 
-#include "struct.h"
+#include "../struct.h"
 
 class LaplacianProcessor {
 public:

@@ -6,11 +6,11 @@
 #include <future>
 #include <mutex>
 #include <atomic>
-#include "laplacian.h"
-#include "bmp.h"
-#include "scan.h"
-#include "XMP_tools.h"
-#include "gui.h"
+#include "img_tools/laplacian.h"
+#include "img_tools/bmp.h"
+#include "tools/scan.h"
+#include "tools/XMP_tools.h"
+#include "gui/gui.h"
 
 class FocusCheckerApp {
 private:

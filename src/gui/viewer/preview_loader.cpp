@@ -1,5 +1,5 @@
 #include "preview_loader.h"
-#include "bmp.h"
+#include "../../img_tools/bmp.h"
 
 #include <algorithm>
 #include <cmath>

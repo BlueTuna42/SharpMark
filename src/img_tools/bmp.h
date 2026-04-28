@@ -1,7 +1,7 @@
 #ifndef BMP_H 
 #define BMP_H
 
-#include "struct.h"
+#include "../struct.h"
 #include <string>
 #include <memory>
 

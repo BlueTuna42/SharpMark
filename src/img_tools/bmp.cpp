@@ -4,7 +4,7 @@
 #include <future>
 
 #define STB_IMAGE_IMPLEMENTATION
-#include "Lib/stb_image.h"
+#include "../Lib/stb_image.h"
 #include <libraw/libraw.h>
 
 std::unique_ptr<GrayscaleImage> ImageIO::readImage(const std::string& filename, bool halfSize) {

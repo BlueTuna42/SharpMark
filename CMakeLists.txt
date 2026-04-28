@@ -66,22 +66,22 @@ endif()
 
 # Source files
 set(SOURCES
-    main.cpp
-    gui/window/app_style.cpp
-    laplacian.cpp
-    bmp.cpp
-    gui/viewer/image_viewer.cpp
-    gui/window/main_window_builder.cpp
-    gui/utils/path_utils.cpp
-    gui/actions/delete_blurry_action.cpp
-    gui/actions/photo_trash.cpp
-    scan.cpp
-    XMP_tools.cpp
-    gui/viewer/preview_loader.cpp
-    gui/results/result_list_view.cpp
-    gui/results/result_store.cpp
-    gui/status/progress_summary.cpp
-    gui.cpp
+    src/main.cpp
+    src/gui/window/app_style.cpp
+    src/img_tools/laplacian.cpp
+    src/img_tools/bmp.cpp
+    src/gui/viewer/image_viewer.cpp
+    src/gui/window/main_window_builder.cpp
+    src/gui/utils/path_utils.cpp
+    src/gui/actions/delete_blurry_action.cpp
+    src/gui/actions/photo_trash.cpp
+    src/tools/scan.cpp
+    src/tools/XMP_tools.cpp
+    src/gui/viewer/preview_loader.cpp
+    src/gui/results/result_list_view.cpp
+    src/gui/results/result_store.cpp
+    src/gui/status/progress_summary.cpp
+    src/gui/gui.cpp
 )
 
 add_executable(focus_checker ${SOURCES})
