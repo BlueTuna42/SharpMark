@@ -84,7 +84,11 @@ set(SOURCES
     src/gui/gui.cpp
 )
 
-add_executable(focus_checker ${SOURCES})
+if(WIN32)
+    add_executable(focus_checker WIN32 ${SOURCES})
+else()
+    add_executable(focus_checker ${SOURCES})
+endif()
 
 target_include_directories(focus_checker PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 

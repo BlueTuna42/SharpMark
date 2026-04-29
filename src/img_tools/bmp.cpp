@@ -2,6 +2,17 @@
 #include <iostream>
 #include <cstring>
 #include <future>
+#include <filesystem>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+#ifdef _WIN32
+#define strcasecmp _stricmp
+#else
+#include <strings.h>
+#endif
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "../Lib/stb_image.h"
@@ -11,6 +22,12 @@ std::unique_ptr<GrayscaleImage> ImageIO::readImage(const std::string& filename, 
     size_t extPos = filename.find_last_of('.');
     std::string ext = (extPos == std::string::npos) ? "" : filename.substr(extPos);
     
+#ifdef _WIN32
+    // Convert path to UTF-8
+    std::filesystem::path fs_path = std::filesystem::u8path(filename);
+    std::wstring w_filename = fs_path.wstring();
+#endif
+
     bool isRaw = (strcasecmp(ext.c_str(), ".CR2") == 0 || strcasecmp(ext.c_str(), ".NEF") == 0 ||
                   strcasecmp(ext.c_str(), ".ARW") == 0 || strcasecmp(ext.c_str(), ".DNG") == 0 ||
                   strcasecmp(ext.c_str(), ".RW2") == 0 || strcasecmp(ext.c_str(), ".RAF") == 0);
@@ -19,6 +36,7 @@ std::unique_ptr<GrayscaleImage> ImageIO::readImage(const std::string& filename, 
         libraw_data_t *lr = libraw_init(0);
 
         if (libraw_open_file(lr, filename.c_str()) != LIBRAW_SUCCESS) return nullptr;
+
         // half size optimization
         if (halfSize) {
              lr->params.half_size = 1;
@@ -51,7 +69,17 @@ std::unique_ptr<GrayscaleImage> ImageIO::readImage(const std::string& filename, 
         return grayImg;
     } else {
         int w, h, c;
-        unsigned char *data = stbi_load(filename.c_str(), &w, &h, &c, 3);
+        unsigned char *data = nullptr;
+
+#ifdef _WIN32
+        FILE* f = _wfopen(w_filename.c_str(), L"rb");
+        if (f) {
+            data = stbi_load_from_file(f, &w, &h, &c, 3);
+            fclose(f);
+        }
+#else
+        data = stbi_load(filename.c_str(), &w, &h, &c, 3);
+#endif
         if (!data) return nullptr;
         
         auto grayImg = std::make_unique<GrayscaleImage>(w, h);

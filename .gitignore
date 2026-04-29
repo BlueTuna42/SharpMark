@@ -52,7 +52,10 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+# Build outputs 
 build
+*_Portable
 
 # Images
 *.jpg
@@ -71,3 +74,4 @@ Images
 *BlurryList.txt
 *.json
 *.fftw
+*.zip
