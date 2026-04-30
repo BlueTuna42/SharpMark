@@ -273,6 +273,35 @@ static gboolean on_viewer_key_press(GtkWidget* widget, GdkEventKey* event, gpoin
     if (event->keyval == GDK_KEY_Escape) {
         gtk_widget_destroy(ctx->viewer_window);
         return TRUE;
+    } else if (event->keyval == GDK_KEY_Delete || event->keyval == GDK_KEY_KP_Delete) {
+        if (ctx->callbacks.deleteByFilename) {
+            int currentIndex = ctx->callbacks.visibleIndexForFilename(ctx->filename);
+            
+            // Initiate deletion. deleteByFilename handles the confirmation dialog.
+            if (ctx->callbacks.deleteByFilename(ctx->filename, GTK_WINDOW(ctx->viewer_window))) {
+                // After successful deletion, the list shifts. Try to show the image that took this index.
+                const ResultData* nextResult = ctx->callbacks.visibleAt(currentIndex);
+                
+                // If there is no image at this index (e.g. we deleted the last image), try the previous one.
+                if (!nextResult && currentIndex > 0) {
+                    nextResult = ctx->callbacks.visibleAt(currentIndex - 1);
+                }
+                
+                if (nextResult) {
+                    // Update viewer with the next available image
+                    ctx->filename = nextResult->filename;
+                    ctx->isBlurry = nextResult->isBlurry;
+                    load_current_image(ctx);
+                    if (ctx->callbacks.selectVisibleRow) {
+                        ctx->callbacks.selectVisibleRow(ctx->callbacks.visibleIndexForFilename(ctx->filename));
+                    }
+                } else {
+                    // If no images are left, simply close the viewer
+                    gtk_widget_destroy(ctx->viewer_window);
+                }
+            }
+        }
+        return TRUE;
     } else if (event->keyval == GDK_KEY_Left) {
         if (gtk_widget_get_sensitive(ctx->previous_button)) on_previous_clicked(GTK_BUTTON(ctx->previous_button), ctx);
         return TRUE;
@@ -336,6 +365,14 @@ static void load_current_image(ImageContext* ctx) {
     ctx->original_pixbuf = load_preview_pixbuf(ctx->filename, 8192, 8192);
 
     if (ctx->original_pixbuf) {
+        // Add an adaptive width border: 1% of the smaller side, but at least 8 pixels.
+        int w = gdk_pixbuf_get_width(ctx->original_pixbuf);
+        int h = gdk_pixbuf_get_height(ctx->original_pixbuf);
+        int dynamicBorder = std::max(8, std::min(w, h) / 100);
+        
+        // Apply the border to the original Pixbuf for the Viewer
+        ctx->original_pixbuf = add_status_border(ctx->original_pixbuf, ctx->isBlurry, dynamicBorder);
+
         reset_zoom_to_fit(ctx);
         apply_zoom_sync(ctx);
     } else {

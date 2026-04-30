@@ -174,12 +174,11 @@ GdkPixbuf* load_preview_pixbuf(const std::string& filename, int maxWidth, int ma
     return create_pixbuf_from_grayscale(*image, maxWidth, maxHeight);
 }
 
-GdkPixbuf* add_status_border(GdkPixbuf* pixbuf, bool isBlurry) {
+GdkPixbuf* add_status_border(GdkPixbuf* pixbuf, bool isBlurry, int borderWidth) {
     if (!pixbuf) {
         return nullptr;
     }
 
-    constexpr int borderWidth = 4;
     const int sourceWidth = gdk_pixbuf_get_width(pixbuf);
     const int sourceHeight = gdk_pixbuf_get_height(pixbuf);
     GdkPixbuf* framed = gdk_pixbuf_new(GDK_COLORSPACE_RGB,

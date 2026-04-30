@@ -5,6 +5,6 @@
 #include <string>
 
 GdkPixbuf* load_preview_pixbuf(const std::string& filename, int maxWidth, int maxHeight);
-GdkPixbuf* add_status_border(GdkPixbuf* pixbuf, bool isBlurry);
+GdkPixbuf* add_status_border(GdkPixbuf* pixbuf, bool isBlurry, int borderWidth = 4);
 
 #endif
