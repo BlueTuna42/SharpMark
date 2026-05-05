@@ -18,13 +18,15 @@ private:
     std::mutex output_mutex; 
 
 public:
-    bool processDirectory(const std::string& dirpath, VisualGUI& gui) {
+        bool processDirectory(const std::string& dirpath, VisualGUI& gui) {
         auto files = Scanner::scanFiles(dirpath);
         std::cout << "Found " << files.size() << " image file(s):" << std::endl;
         const int totalFiles = static_cast<int>(files.size());
+        
         std::atomic<int> processedFiles{0};
         std::atomic<int> sharpFiles{0};
         std::atomic<int> blurryFiles{0};
+        
         gui.SetCurrentDirectory(dirpath);
         gui.ResetProgress(totalFiles);
 
@@ -36,32 +38,52 @@ public:
 
 #ifdef DEBUG_BENCHMARK
         auto ts_total_start = std::chrono::high_resolution_clock::now();
-#endif    
-        // Launch processing
-        std::vector<std::future<void>> futures;
-        for (const auto& f : files) {
-            futures.push_back(std::async(std::launch::async, [this, &log, &gui, &processedFiles, &sharpFiles, &blurryFiles, totalFiles, f]() {
-                const int result = processFile(f, log, gui);
-                if (result == 0) {
-                    ++sharpFiles;
-                } else if (result == 1) {
-                    ++blurryFiles;
+#endif
+
+        // Determine optimal number of threads (fallback to 4 if OS fails to report)
+        const unsigned int numThreads = std::thread::hardware_concurrency();
+        const unsigned int threadsToUse = (numThreads > 0) ? numThreads : 4;
+        
+        std::atomic<size_t> fileIndex{0};
+        std::vector<std::thread> workers;
+
+        // Launch fixed number of worker threads
+        for (unsigned int i = 0; i < threadsToUse; ++i) {
+            workers.emplace_back([this, &files, &log, &gui, &processedFiles, &sharpFiles, &blurryFiles, totalFiles, &fileIndex]() {
+                while (true) {
+                    // Thread-safe fetch of the next file index
+                    size_t idx = fileIndex.fetch_add(1, std::memory_order_relaxed);
+                    if (idx >= files.size()) {
+                        break;
+                    }
+                    
+                    const std::string& f = files[idx];
+                    const int result = processFile(f, log, gui);
+                    
+                    if (result == 0) {
+                        ++sharpFiles;
+                    } else if (result == 1) {
+                        ++blurryFiles;
+                    }
+
+                    const int current = ++processedFiles;
+                    gui.UpdateProgress(current, totalFiles);
                 }
-                const int current = ++processedFiles;
-                gui.UpdateProgress(current, totalFiles);
-            }));
+            });
         }
 
-        // Wait for all processing threads to finish
-        for (auto& fut : futures) {
-            fut.wait();
+        // Wait for all worker threads to complete
+        for (auto& worker : workers) {
+            if (worker.joinable()) {
+                worker.join();
+            }
         }
 
 #ifdef DEBUG_BENCHMARK
         auto ts_total_end = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double, std::milli> total_time = ts_total_end - ts_total_start;
         std::cout << "\n========================================" << std::endl;
-        std::cout << "  [TOTAL] Directory processing time: " << total_time.count() << " ms" << std::endl;
+        std::cout << " [TOTAL] Directory processing time: " << total_time.count() << " ms" << std::endl;
         std::cout << "========================================" << std::endl;
 #endif
 
