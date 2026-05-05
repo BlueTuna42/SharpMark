@@ -5,6 +5,7 @@
 
 #include <condition_variable>
 #include <gtk/gtk.h>
+#include "gui.h"
 #include <mutex>
 #include <string>
 #include <thread>
@@ -27,6 +28,8 @@ struct GUIContext {
     GtkWidget *summary_sharp_label = nullptr;
     GtkWidget *summary_blurry_label = nullptr;
     GtkWidget *summary_bar = nullptr;
+    GtkWidget *button_settings = nullptr;
+    AppSettings settings;
     int summarySharp = 0;
     int summaryBlurry = 0;
     SortMode sortMode = SortMode::Default;

@@ -15,6 +15,7 @@ struct MainWindowCallbacks {
     GCallback resultRowActivated = nullptr;
     GCallback resultListKeyPress = nullptr;
     GCallback summaryDraw = nullptr;
+    GCallback settingsClicked = nullptr;
 };
 
 void build_main_window(GUIContext& ctx, const MainWindowCallbacks& callbacks);

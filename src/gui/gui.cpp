@@ -440,6 +440,72 @@ static void on_recheck_button_clicked(GtkWidget *widget, gpointer data) {
     start_analysis_for_directory(dirpath);
 }
 
+// Settings action
+
+static void on_settings_clicked(GtkWidget* widget, gpointer data) {
+    GtkWidget *dialog = gtk_dialog_new_with_buttons("Settings",
+        GTK_WINDOW(g_ctx->window),
+        static_cast<GtkDialogFlags>(GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT),
+        "_OK", GTK_RESPONSE_OK,
+        "_Cancel", GTK_RESPONSE_CANCEL,
+        NULL);
+        
+    GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+    gtk_container_set_border_width(GTK_CONTAINER(grid), 15);
+    gtk_box_pack_start(GTK_BOX(content_area), grid, TRUE, TRUE, 0);
+    
+    // Theme options
+    GtkWidget *theme_label = gtk_label_new("Theme:");
+    gtk_widget_set_halign(theme_label, GTK_ALIGN_START);
+    GtkWidget *theme_combo = gtk_combo_box_text_new();
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(theme_combo), "System");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(theme_combo), "Light");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(theme_combo), "Dark");
+    gtk_combo_box_set_active(GTK_COMBO_BOX(theme_combo), g_ctx->settings.themeMode);
+    
+    gtk_grid_attach(GTK_GRID(grid), theme_label, 0, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), theme_combo, 1, 0, 1, 1);
+    
+    // EXIF toggle
+    GtkWidget *exif_check = gtk_check_button_new_with_label("Write EXIF rating based on sharpness");
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(exif_check), g_ctx->settings.writeExif);
+    gtk_grid_attach(GTK_GRID(grid), exif_check, 0, 1, 2, 1);
+    
+    // RAW open mode
+    GtkWidget *raw_label = gtk_label_new("Open RAW images:");
+    gtk_widget_set_halign(raw_label, GTK_ALIGN_START);
+    GtkWidget *raw_combo = gtk_combo_box_text_new();
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(raw_combo), "Half size");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(raw_combo), "Full size");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(raw_combo), "Preview");
+    gtk_combo_box_set_active(GTK_COMBO_BOX(raw_combo), g_ctx->settings.rawMode);
+    
+    gtk_grid_attach(GTK_GRID(grid), raw_label, 0, 2, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), raw_combo, 1, 2, 1, 1);
+    
+    gtk_widget_show_all(dialog);
+    
+    if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK) {
+        std::lock_guard<std::mutex> lock(g_ctx->mtx);
+        g_ctx->settings.themeMode = gtk_combo_box_get_active(GTK_COMBO_BOX(theme_combo));
+        g_ctx->settings.writeExif = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(exif_check));
+        g_ctx->settings.rawMode = gtk_combo_box_get_active(GTK_COMBO_BOX(raw_combo));
+        
+        GtkSettings *gtk_settings = gtk_settings_get_default();
+        if (g_ctx->settings.themeMode == 1) { // Light
+            g_object_set(gtk_settings, "gtk-application-prefer-dark-theme", FALSE, NULL);
+        } else if (g_ctx->settings.themeMode == 2) { // Dark
+            g_object_set(gtk_settings, "gtk-application-prefer-dark-theme", TRUE, NULL);
+        } else { // System
+            gtk_settings_reset_property(gtk_settings, "gtk-application-prefer-dark-theme");
+        }
+    }
+    gtk_widget_destroy(dialog);
+}
+
 // GTK thread
 
 static void run_gtk_thread() {
@@ -457,7 +523,8 @@ static void run_gtk_thread() {
         G_CALLBACK(on_delete_blurry_clicked),
         G_CALLBACK(on_result_row_activated),
         G_CALLBACK(on_result_list_key_press),
-        G_CALLBACK(on_summary_draw)
+        G_CALLBACK(on_summary_draw),
+        G_CALLBACK(on_settings_clicked)
     });
 
     gtk_widget_show_all(g_ctx->window);
@@ -526,4 +593,10 @@ bool VisualGUI::IsClosed() const {
     if (!g_ctx) return true;
     std::lock_guard<std::mutex> lock(g_ctx->mtx);
     return g_ctx->windowClosed;
+}
+
+AppSettings VisualGUI::GetSettings() const {
+    if (!g_ctx) return AppSettings();
+    std::lock_guard<std::mutex> lock(g_ctx->mtx);
+    return g_ctx->settings;
 }

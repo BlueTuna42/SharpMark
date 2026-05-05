@@ -18,8 +18,6 @@ private:
     std::mutex output_mutex; 
 
 public:
-    bool useHalfSize = true; 
-
     bool processDirectory(const std::string& dirpath, VisualGUI& gui) {
         auto files = Scanner::scanFiles(dirpath);
         std::cout << "Found " << files.size() << " image file(s):" << std::endl;
@@ -73,31 +71,39 @@ public:
     }
 
     int processFile(const std::string& file, std::ofstream& log, VisualGUI& gui) {
-#ifdef DEBUG_BENCHMARK
-        auto ts_read = std::chrono::high_resolution_clock::now();
-#endif
-        auto image = ImageIO::readImage(file, useHalfSize);
-        if (!image) return -1;
+    AppSettings settings = gui.GetSettings();
 
 #ifdef DEBUG_BENCHMARK
-        auto te_read = std::chrono::high_resolution_clock::now();
-        auto ts_laplace = std::chrono::high_resolution_clock::now();
+    auto ts_read = std::chrono::high_resolution_clock::now();
 #endif
-        
-        double maxVariance = LaplacianProcessor::evaluateSharpness(*image, 5, 5);
+    
+    // Pass rawMode to readImage. ImageIO must be updated to handle the int format.
+    auto image = ImageIO::readImage(file, settings.rawMode); 
+    if (!image) return -1;
 
 #ifdef DEBUG_BENCHMARK
-        auto te_laplace = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double, std::milli> t_read = te_read - ts_read;
-        std::chrono::duration<double, std::milli> t_laplace = te_laplace - ts_laplace;
+    auto te_read = std::chrono::high_resolution_clock::now();
+    auto ts_laplace = std::chrono::high_resolution_clock::now();
 #endif
 
-        bool isBlurry = (maxVariance < focusConst);
+    double maxVariance = LaplacianProcessor::evaluateSharpness(*image, 5, 5);
+
+#ifdef DEBUG_BENCHMARK
+    auto te_laplace = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> t_read = te_read - ts_read;
+    std::chrono::duration<double, std::milli> t_laplace = te_laplace - ts_laplace;
+#endif
+
+    bool isBlurry = (maxVariance < focusConst);
+    
+    if (settings.writeExif) {
         if (isBlurry) {
             XMPTools::writeXmpRating(file, 1);
         } else {
             XMPTools::writeXmpRating(file, 5);
         }
+    }
+
 
         gui.AddResult(file, isBlurry);
 
@@ -129,7 +135,6 @@ int main(int argc, char** argv) {
     std::string dirpath;
     VisualGUI gui;
     FocusCheckerApp app;
-    app.useHalfSize = true;
     
     if (argc > 1) {
         dirpath = argv[1];

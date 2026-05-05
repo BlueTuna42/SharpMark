@@ -29,6 +29,11 @@ static void build_top_bar(GUIContext& ctx, GtkWidget* vbox, const MainWindowCall
     g_signal_connect(ctx.button_recheck, "clicked", callbacks.recheckClicked, NULL);
     gtk_box_pack_start(GTK_BOX(ctx.top_button_box), ctx.button_recheck, FALSE, FALSE, 0);
     gtk_widget_hide(ctx.button_recheck);
+
+    ctx.button_settings = gtk_button_new_from_icon_name("preferences-system-symbolic", GTK_ICON_SIZE_BUTTON);
+    gtk_widget_set_tooltip_text(ctx.button_settings, "Settings");
+    g_signal_connect(ctx.button_settings, "clicked", callbacks.settingsClicked, NULL);
+    gtk_box_pack_start(GTK_BOX(ctx.top_button_box), ctx.button_settings, FALSE, FALSE, 0);
 }
 
 static void build_progress_bar(GUIContext& ctx, GtkWidget* vbox) {
