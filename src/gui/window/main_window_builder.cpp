@@ -6,8 +6,16 @@ static GtkWidget* create_main_window(GUIContext& ctx, const MainWindowCallbacks&
     gtk_window_set_default_size(GTK_WINDOW(ctx.window), 800, 600);
     g_signal_connect(ctx.window, "destroy", callbacks.windowDestroy, NULL);
 
+    // add icon
     gtk_window_set_default_icon_name("icon");
     gtk_window_set_icon_name(GTK_WINDOW(ctx.window), "icon");
+    GError* error = nullptr;
+    /*
+    if (!gtk_window_set_default_icon_from_file("../assets/icons/512x512/icon.png", &error)) {
+        g_warning("Failed to load local icon: %s", error->message);
+        g_clear_error(&error);
+    }
+    */
 
     GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
     gtk_container_set_border_width(GTK_CONTAINER(vbox), 10);

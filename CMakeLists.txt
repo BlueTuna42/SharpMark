@@ -108,3 +108,22 @@ target_link_libraries(SharpMark PRIVATE Threads::Threads)
 if(UNIX)
     target_link_libraries(SharpMark PRIVATE m)
 endif()
+
+if(UNIX AND NOT APPLE)
+    # Install executable in /usr/local/bin 
+    install(TARGETS SharpMark DESTINATION bin)
+
+    # Install .desktop in app menu
+    install(FILES assets/sharpmark.desktop 
+            DESTINATION share/applications)
+
+    # Install icon in system theme hicolor 
+    install(FILES assets/icons/256x256/icon.png 
+            DESTINATION share/icons/hicolor/256x256/apps 
+            RENAME sharpmark.png)
+            
+    # Uncomment for svg image
+    # install(FILES assets/icons/app_icon.svg 
+    #         DESTINATION share/icons/hicolor/scalable/apps 
+    #         RENAME sharpmark.svg)
+endif()
