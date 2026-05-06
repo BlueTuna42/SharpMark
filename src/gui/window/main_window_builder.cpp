@@ -151,6 +151,7 @@ static void build_results_area(GUIContext& ctx, GtkWidget* vbox, const MainWindo
     gtk_container_add(GTK_CONTAINER(ctx.list_overlay), ctx.list_scrolled_window);
     gtk_widget_add_events(ctx.list_scrolled_window, GDK_SCROLL_MASK);
     g_signal_connect(ctx.list_scrolled_window, "scroll-event", callbacks.listScrollEvent, NULL);
+    g_signal_connect(ctx.list_box, "key-press-event", callbacks.resultListKeyPress, NULL);
     GtkWidget *view_stack = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_container_add(GTK_CONTAINER(ctx.list_scrolled_window), view_stack);
 
@@ -163,12 +164,13 @@ static void build_results_area(GUIContext& ctx, GtkWidget* vbox, const MainWindo
     gtk_box_pack_start(GTK_BOX(view_stack), ctx.list_box, TRUE, TRUE, 0);
 
     ctx.flow_box = gtk_flow_box_new();
-    gtk_widget_set_name(ctx.flow_box, "results-flow-box");
+    gtk_widget_set_name(ctx.flow_box, "results-flow-box"); 
     gtk_widget_set_valign(ctx.flow_box, GTK_ALIGN_START);
     gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(ctx.flow_box), 20);
     gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(ctx.flow_box), GTK_SELECTION_MULTIPLE);
     gtk_flow_box_set_activate_on_single_click(GTK_FLOW_BOX(ctx.flow_box), FALSE);
     g_signal_connect(ctx.flow_box, "child-activated", callbacks.flowBoxChildActivated, NULL);
+    g_signal_connect(ctx.flow_box, "key-press-event", callbacks.resultListKeyPress, NULL);
     gtk_box_pack_start(GTK_BOX(view_stack), ctx.flow_box, TRUE, TRUE, 0);
 
     GtkCssProvider *provider = gtk_css_provider_new();

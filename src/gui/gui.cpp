@@ -582,45 +582,35 @@ static void on_recheck_button_clicked(GtkWidget *widget, gpointer data) {
 }
 
 static void apply_theme(int themeMode) {
-    GtkSettings *gtk_settings = gtk_settings_get_default();
-    if (!gtk_settings) return;
+    GtkSettings *settings = gtk_settings_get_default();
+    if (!settings) return;
 
     if (themeMode == 1) { // Light
-        g_object_set(gtk_settings, "gtk-application-prefer-dark-theme", FALSE, NULL);
+        g_object_set(settings, "gtk-application-prefer-dark-theme", FALSE, NULL);
         
         gchar *theme_name = nullptr;
-        g_object_get(gtk_settings, "gtk-theme-name", &theme_name, NULL);
+        g_object_get(settings, "gtk-theme-name", &theme_name, NULL);
         if (theme_name) {
-            std::string tName(theme_name);
-            bool changed = false;
-            
-            if (tName.length() >= 5) {
-                std::string suffix = tName.substr(tName.length() - 5);
-                if (suffix == "-dark" || suffix == "-Dark") {
-                    tName = tName.substr(0, tName.length() - 5);
-                    changed = true;
-                }
-            }
-            if (changed) {
-                g_object_set(gtk_settings, "gtk-theme-name", tName.c_str(), NULL);
+            std::string t(theme_name);
+            if (t.length() >= 5 && (t.substr(t.length() - 5) == "-dark" || t.substr(t.length() - 5) == "-Dark")) {
+                t = t.substr(0, t.length() - 5);
+                g_object_set(settings, "gtk-theme-name", t.c_str(), NULL);
             }
             g_free(theme_name);
         }
+#ifdef _WIN32
+        g_object_set(settings, "gtk-theme-name", "Adwaita", NULL);
+#endif
     } else if (themeMode == 2) { // Dark
-        g_object_set(gtk_settings, "gtk-application-prefer-dark-theme", TRUE, NULL);
-        
-        gchar *theme_name = nullptr;
-        g_object_get(gtk_settings, "gtk-theme-name", &theme_name, NULL);
-        if (theme_name) {
-            std::string tName(theme_name);
-            if (tName == "Adwaita") {
-                g_object_set(gtk_settings, "gtk-theme-name", "Adwaita-dark", NULL);
-            }
-            g_free(theme_name);
-        }
+        g_object_set(settings, "gtk-application-prefer-dark-theme", TRUE, NULL);
+#ifdef _WIN32
+        g_object_set(settings, "gtk-theme-name", "Adwaita", NULL);
+#endif
     } else { // System
-        gtk_settings_reset_property(gtk_settings, "gtk-application-prefer-dark-theme");
-        gtk_settings_reset_property(gtk_settings, "gtk-theme-name");
+        gtk_settings_reset_property(settings, "gtk-application-prefer-dark-theme");
+#ifdef _WIN32
+        gtk_settings_reset_property(settings, "gtk-theme-name");
+#endif
     }
 }
 
