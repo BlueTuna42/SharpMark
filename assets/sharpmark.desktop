@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=SharpMark
+Comment=Image sharpness analysis application
+Exec=SharpMark
+Icon=sharpmark
+Terminal=false
+Categories=Utility;Graphics;
