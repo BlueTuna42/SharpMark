@@ -15,6 +15,7 @@
 #include <vector>
 #include <thread>
 #include <mutex>
+#include <string>
 
 struct DirectoryData {
     std::string dirpath;
@@ -49,7 +50,7 @@ static ResultListView current_result_list_view() {
         g_ctx->empty_results_label,
         G_CALLBACK(on_result_delete_button_clicked),
         static_cast<int>(g_ctx->viewMode),
-        g_ctx->zoomLevel // <--- передаем уровень зума
+        g_ctx->zoomLevel
     };
 }
 
@@ -521,7 +522,7 @@ static void on_flow_box_child_activated(GtkFlowBox* box, GtkFlowBoxChild* child,
 }
 
 static gboolean on_list_scroll_event(GtkWidget* widget, GdkEventScroll* event, gpointer data) {
-    if (event->state & GDK_CONTROL_MASK) { // Если зажат Ctrl
+    if (event->state & GDK_CONTROL_MASK) {
         double delta = 0.0;
         
         if (event->direction == GDK_SCROLL_UP) {
@@ -537,12 +538,12 @@ static gboolean on_list_scroll_event(GtkWidget* widget, GdkEventScroll* event, g
             double newZoom = std::max(0.2, std::min(4.0, g_ctx->zoomLevel + delta));
             if (std::abs(newZoom - g_ctx->zoomLevel) > 0.01) {
                 g_ctx->zoomLevel = newZoom;
-                rebuild_result_list(); // Перерисовываем список
+                rebuild_result_list();
             }
-            return TRUE; // Блокируем стандартную прокрутку
+            return TRUE;
         }
     }
-    return FALSE; // Разрешаем стандартную прокрутку
+    return FALSE;
 }
 
 // Window callbacks
@@ -578,6 +579,49 @@ static void on_recheck_button_clicked(GtkWidget *widget, gpointer data) {
     }
 
     start_analysis_for_directory(dirpath);
+}
+
+static void apply_theme(int themeMode) {
+    GtkSettings *gtk_settings = gtk_settings_get_default();
+    if (!gtk_settings) return;
+
+    if (themeMode == 1) { // Light
+        g_object_set(gtk_settings, "gtk-application-prefer-dark-theme", FALSE, NULL);
+        
+        gchar *theme_name = nullptr;
+        g_object_get(gtk_settings, "gtk-theme-name", &theme_name, NULL);
+        if (theme_name) {
+            std::string tName(theme_name);
+            bool changed = false;
+            
+            if (tName.length() >= 5) {
+                std::string suffix = tName.substr(tName.length() - 5);
+                if (suffix == "-dark" || suffix == "-Dark") {
+                    tName = tName.substr(0, tName.length() - 5);
+                    changed = true;
+                }
+            }
+            if (changed) {
+                g_object_set(gtk_settings, "gtk-theme-name", tName.c_str(), NULL);
+            }
+            g_free(theme_name);
+        }
+    } else if (themeMode == 2) { // Dark
+        g_object_set(gtk_settings, "gtk-application-prefer-dark-theme", TRUE, NULL);
+        
+        gchar *theme_name = nullptr;
+        g_object_get(gtk_settings, "gtk-theme-name", &theme_name, NULL);
+        if (theme_name) {
+            std::string tName(theme_name);
+            if (tName == "Adwaita") {
+                g_object_set(gtk_settings, "gtk-theme-name", "Adwaita-dark", NULL);
+            }
+            g_free(theme_name);
+        }
+    } else { // System
+        gtk_settings_reset_property(gtk_settings, "gtk-application-prefer-dark-theme");
+        gtk_settings_reset_property(gtk_settings, "gtk-theme-name");
+    }
 }
 
 // Settings action
@@ -629,19 +673,18 @@ static void on_settings_clicked(GtkWidget* widget, gpointer data) {
     gtk_widget_show_all(dialog);
     
     if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK) {
-        std::lock_guard<std::mutex> lock(g_ctx->mtx);
-        g_ctx->settings.themeMode = gtk_combo_box_get_active(GTK_COMBO_BOX(theme_combo));
-        g_ctx->settings.writeExif = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(exif_check));
-        g_ctx->settings.rawMode = gtk_combo_box_get_active(GTK_COMBO_BOX(raw_combo));
-        
-        GtkSettings *gtk_settings = gtk_settings_get_default();
-        if (g_ctx->settings.themeMode == 1) { // Light
-            g_object_set(gtk_settings, "gtk-application-prefer-dark-theme", FALSE, NULL);
-        } else if (g_ctx->settings.themeMode == 2) { // Dark
-            g_object_set(gtk_settings, "gtk-application-prefer-dark-theme", TRUE, NULL);
-        } else { // System
-            gtk_settings_reset_property(gtk_settings, "gtk-application-prefer-dark-theme");
+        int newThemeMode = gtk_combo_box_get_active(GTK_COMBO_BOX(theme_combo));
+        bool newWriteExif = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(exif_check));
+        int newRawMode = gtk_combo_box_get_active(GTK_COMBO_BOX(raw_combo));
+
+        {
+            std::lock_guard<std::mutex> lock(g_ctx->mtx);
+            g_ctx->settings.themeMode = newThemeMode;
+            g_ctx->settings.writeExif = newWriteExif;
+            g_ctx->settings.rawMode = newRawMode;
         }
+
+        apply_theme(newThemeMode);
     }
     gtk_widget_destroy(dialog);
 }
@@ -653,6 +696,8 @@ static void run_gtk_thread() {
     char **argv = nullptr;
     gtk_init(&argc, &argv);
     install_app_css();
+
+    apply_theme(g_ctx->settings.themeMode);
 
     build_main_window(*g_ctx, {
         G_CALLBACK(on_window_destroy),

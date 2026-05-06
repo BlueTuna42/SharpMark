@@ -100,6 +100,45 @@ static void build_directory_bar(GUIContext& ctx, GtkWidget* vbox, const MainWind
     gtk_widget_hide(ctx.directory_box);
 }
 
+static void update_selection_css(GtkSettings *settings, GParamSpec *pspec, gpointer user_data) {
+    GtkCssProvider *provider = GTK_CSS_PROVIDER(user_data);
+    gboolean prefer_dark = FALSE;
+    gchar *theme_name = nullptr;
+    
+    g_object_get(settings, 
+                 "gtk-application-prefer-dark-theme", &prefer_dark, 
+                 "gtk-theme-name", &theme_name, 
+                 NULL);
+    
+    bool is_dark = prefer_dark;
+    if (theme_name) {
+        std::string tName(theme_name);
+        if (tName.length() >= 5) {
+            std::string suffix = tName.substr(tName.length() - 5);
+            if (suffix == "-dark" || suffix == "-Dark") {
+                is_dark = true;
+            }
+        }
+        g_free(theme_name);
+    }
+
+    const char* css = is_dark ? 
+        "#results-flow-box flowboxchild:selected,\n"
+        "#results-list-box row:selected {\n"
+        "  background-color: #f4f4f4;\n" 
+        "  color: #000000;\n"            
+        "  border-radius: 6px;\n"        
+        "}\n" :
+        "#results-flow-box flowboxchild:selected,\n"
+        "#results-list-box row:selected {\n"
+        "  background-color: #d0d0d0;\n" 
+        "  color: #000000;\n"            
+        "  border-radius: 6px;\n"        
+        "}\n";
+        
+    gtk_css_provider_load_from_data(provider, css, -1, NULL);
+}
+
 static void build_results_area(GUIContext& ctx, GtkWidget* vbox, const MainWindowCallbacks& callbacks) {
     ctx.list_overlay = gtk_overlay_new();
     gtk_box_pack_start(GTK_BOX(vbox), ctx.list_overlay, TRUE, TRUE, 0);
@@ -116,6 +155,7 @@ static void build_results_area(GUIContext& ctx, GtkWidget* vbox, const MainWindo
     gtk_container_add(GTK_CONTAINER(ctx.list_scrolled_window), view_stack);
 
     ctx.list_box = gtk_list_box_new();
+    gtk_widget_set_name(ctx.list_box, "results-list-box");
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(ctx.list_box), GTK_SELECTION_MULTIPLE);
     gtk_list_box_set_activate_on_single_click(GTK_LIST_BOX(ctx.list_box), FALSE);
     g_signal_connect(ctx.list_box, "row-activated", callbacks.resultRowActivated, NULL);
@@ -123,13 +163,27 @@ static void build_results_area(GUIContext& ctx, GtkWidget* vbox, const MainWindo
     gtk_box_pack_start(GTK_BOX(view_stack), ctx.list_box, TRUE, TRUE, 0);
 
     ctx.flow_box = gtk_flow_box_new();
+    gtk_widget_set_name(ctx.flow_box, "results-flow-box");
     gtk_widget_set_valign(ctx.flow_box, GTK_ALIGN_START);
     gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(ctx.flow_box), 20);
     gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(ctx.flow_box), GTK_SELECTION_MULTIPLE);
     gtk_flow_box_set_activate_on_single_click(GTK_FLOW_BOX(ctx.flow_box), FALSE);
     g_signal_connect(ctx.flow_box, "child-activated", callbacks.flowBoxChildActivated, NULL);
-    g_signal_connect(ctx.flow_box, "key-press-event", callbacks.resultListKeyPress, NULL);
     gtk_box_pack_start(GTK_BOX(view_stack), ctx.flow_box, TRUE, TRUE, 0);
+
+    GtkCssProvider *provider = gtk_css_provider_new();
+    gtk_style_context_add_provider_for_screen(gdk_screen_get_default(),
+                                              GTK_STYLE_PROVIDER(provider),
+                                              GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+                                              
+    GtkSettings *settings = gtk_settings_get_default();
+    update_selection_css(settings, NULL, provider); // Apply initial CSS based on current settings
+    
+    // Connect signals to listen for theme changes
+    g_signal_connect(settings, "notify::gtk-application-prefer-dark-theme", G_CALLBACK(update_selection_css), provider);
+    g_signal_connect(settings, "notify::gtk-theme-name", G_CALLBACK(update_selection_css), provider);
+    
+    g_object_unref(provider);
 
     gtk_widget_set_no_show_all(ctx.flow_box, TRUE);
 
