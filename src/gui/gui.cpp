@@ -163,18 +163,64 @@ static bool delete_result_by_filename(const std::string& filename, GtkWindow* pa
     return true;
 }
 
-static bool delete_selected_result(GtkWindow* parent) {
-    GtkListBoxRow* row = gtk_list_box_get_selected_row(GTK_LIST_BOX(g_ctx->list_box));
-    if (!row) {
+static bool delete_selected_results(GtkWindow* parent) {
+    std::vector<std::string> filenames;
+
+    if (g_ctx->viewMode == ViewMode::List) {
+        GList* selected = gtk_list_box_get_selected_rows(GTK_LIST_BOX(g_ctx->list_box));
+        for (GList* l = selected; l != nullptr; l = l->next) {
+            const char* fn = static_cast<const char*>(g_object_get_data(G_OBJECT(l->data), "filename"));
+            if (fn) filenames.push_back(fn);
+        }
+        g_list_free(selected);
+    } else {
+        GList* selected = gtk_flow_box_get_selected_children(GTK_FLOW_BOX(g_ctx->flow_box));
+        for (GList* l = selected; l != nullptr; l = l->next) {
+            const char* fn = static_cast<const char*>(g_object_get_data(G_OBJECT(l->data), "filename"));
+            if (fn) filenames.push_back(fn);
+        }
+        g_list_free(selected);
+    }
+
+    if (filenames.empty()) {
         return false;
     }
 
-    const char* filename = static_cast<const char*>(g_object_get_data(G_OBJECT(row), "filename"));
-    if (!filename) {
+    if (filenames.size() == 1) {
+        return delete_result_by_filename(filenames[0], parent);
+    }
+
+    GtkWidget* dialog = gtk_message_dialog_new(parent,
+        GTK_DIALOG_MODAL,
+        GTK_MESSAGE_QUESTION,
+        GTK_BUTTONS_YES_NO,
+        "Move %zu selected photos to trash?", filenames.size());
+    
+    int response = gtk_dialog_run(GTK_DIALOG(dialog));
+    gtk_widget_destroy(dialog);
+    
+    if (response != GTK_RESPONSE_YES) {
         return false;
     }
 
-    return delete_result_by_filename(filename, parent);
+    bool anyDeleted = false;
+    for (const std::string& fn : filenames) {
+        std::string err;
+        if (trash_photo(parent, fn, &err)) {
+            bool removedWasBlurry = false;
+            if (g_ctx->results.removeByFilename(fn, &removedWasBlurry)) {
+                update_summary_after_delete(removedWasBlurry);
+                anyDeleted = true;
+            }
+        }
+    }
+
+    if (anyDeleted) {
+        rebuild_result_list();
+        update_delete_blurry_button_state();
+    }
+    
+    return true;
 }
 
 static void refresh_summary_from_results_if_visible() {
@@ -323,28 +369,61 @@ static bool focus_first_result_row() {
 // Input callbacks
 
 static gboolean on_result_list_key_press(GtkWidget* widget, GdkEventKey* event, gpointer data) {
+    if ((event->state & GDK_CONTROL_MASK) && (event->keyval == GDK_KEY_a || event->keyval == GDK_KEY_A)) {
+        if (g_ctx->viewMode == ViewMode::List) {
+            gtk_list_box_select_all(GTK_LIST_BOX(g_ctx->list_box));
+        } else {
+            gtk_flow_box_select_all(GTK_FLOW_BOX(g_ctx->flow_box));
+        }
+        return TRUE;
+    }
+
     if (event->keyval == GDK_KEY_Delete || event->keyval == GDK_KEY_KP_Delete) {
-        return delete_selected_result(GTK_WINDOW(g_ctx->window)) ? TRUE : FALSE;
+        return delete_selected_results(GTK_WINDOW(g_ctx->window)) ? TRUE : FALSE;
     }
 
     if (event->keyval == GDK_KEY_Return || event->keyval == GDK_KEY_KP_Enter) {
-        GtkListBoxRow* row = gtk_list_box_get_selected_row(GTK_LIST_BOX(g_ctx->list_box));
-        open_result_row(row);
-        return row ? TRUE : FALSE;
-    }
-
-    if (event->keyval != GDK_KEY_Up && event->keyval != GDK_KEY_KP_Up) {
+        if (g_ctx->viewMode == ViewMode::List) {
+            GList* selected = gtk_list_box_get_selected_rows(GTK_LIST_BOX(g_ctx->list_box));
+            if (selected) {
+                open_result_row(GTK_LIST_BOX_ROW(selected->data));
+                g_list_free(selected);
+                return TRUE;
+            }
+        } else {
+            GList* selected = gtk_flow_box_get_selected_children(GTK_FLOW_BOX(g_ctx->flow_box));
+            if (selected) {
+                on_flow_box_child_activated(GTK_FLOW_BOX(g_ctx->flow_box), GTK_FLOW_BOX_CHILD(selected->data), NULL);
+                g_list_free(selected);
+                return TRUE;
+            }
+        }
         return FALSE;
     }
 
-    GtkListBoxRow* row = gtk_list_box_get_selected_row(GTK_LIST_BOX(g_ctx->list_box));
-    const gboolean isFirstRow = row && gtk_list_box_row_get_index(row) == 0;
-    if (!isFirstRow) {
-        return FALSE;
-    }
+    if (event->keyval == GDK_KEY_Up || event->keyval == GDK_KEY_KP_Up) {
+        bool isFirstRow = false;
+        if (g_ctx->viewMode == ViewMode::List) {
+            GList* selected = gtk_list_box_get_selected_rows(GTK_LIST_BOX(g_ctx->list_box));
+            if (selected) {
+                isFirstRow = (gtk_list_box_row_get_index(GTK_LIST_BOX_ROW(selected->data)) == 0);
+                g_list_free(selected);
+            }
+        } else {
+            GList* selected = gtk_flow_box_get_selected_children(GTK_FLOW_BOX(g_ctx->flow_box));
+            if (selected) {
+                isFirstRow = (gtk_flow_box_child_get_index(GTK_FLOW_BOX_CHILD(selected->data)) == 0);
+                g_list_free(selected);
+            }
+        }
 
-    gtk_widget_grab_focus(g_ctx->button_select);
-    return TRUE;
+        if (isFirstRow) {
+            gtk_widget_grab_focus(g_ctx->button_select);
+            return TRUE;
+        }
+    }
+    
+    return FALSE;
 }
 
 static void on_result_delete_button_clicked(GtkButton* button, gpointer data) {
