@@ -31,33 +31,16 @@ struct ImageContext {
     double pivot_orig_y = 0.0; 
     double mouse_view_x = 0.0; 
     double mouse_view_y = 0.0; 
-};
 
-struct ViewerBounds {
-    int windowWidth;
-    int windowHeight;
-    int imageWidth;
-    int imageHeight;
+    // Window states
+    bool initial_fit_done = false;
+    bool is_fullscreen = false;
 };
 
 static void update_viewer_navigation_state(ImageContext* ctx);
 static void load_current_image(ImageContext* ctx);
-
-static ViewerBounds get_viewer_bounds(GtkWindow* window) {
-    GdkRectangle workarea{0, 0, 1024, 768};
-    GdkDisplay* display = gdk_display_get_default();
-
-    if (display) {
-        GdkMonitor* monitor = nullptr;
-        GdkWindow* gdk_win = gtk_widget_get_window(GTK_WIDGET(window));
-        if (gdk_win) {
-            monitor = gdk_display_get_monitor_at_window(display, gdk_win);
-        }
-        if (!monitor) monitor = gdk_display_get_primary_monitor(display);
-        if (monitor) gdk_monitor_get_workarea(monitor, &workarea);
-    }
-    return {workarea.width, workarea.height, workarea.width - 100, workarea.height - 100};
-}
+static void reset_zoom_to_fit(ImageContext* ctx);
+static void apply_zoom_sync(ImageContext* ctx);
 
 static gboolean on_draw(GtkWidget* widget, cairo_t* cr, gpointer data) {
     ImageContext* ctx = static_cast<ImageContext*>(data);
@@ -105,18 +88,45 @@ static void apply_zoom_sync(ImageContext* ctx) {
 static void reset_zoom_to_fit(ImageContext* ctx) {
     if (!ctx->original_pixbuf) return;
 
-    ViewerBounds bounds = get_viewer_bounds(GTK_WINDOW(ctx->viewer_window));
     int orig_w = gdk_pixbuf_get_width(ctx->original_pixbuf);
     int orig_h = gdk_pixbuf_get_height(ctx->original_pixbuf);
 
-    double zoom_w = (double)(bounds.imageWidth) / orig_w;
-    double zoom_h = (double)(bounds.imageHeight) / orig_h;
+    int view_w = 800;
+    int view_h = 600;
+
+    // Get actual allocation of the scrolled view
+    if (ctx->scrolled) {
+        GtkAllocation alloc;
+        gtk_widget_get_allocation(ctx->scrolled, &alloc);
+        if (alloc.width > 1 && alloc.height > 1) {
+            view_w = alloc.width;
+            view_h = alloc.height;
+        } else if (ctx->viewer_window) {
+            gtk_window_get_size(GTK_WINDOW(ctx->viewer_window), &view_w, &view_h);
+            view_h -= 50; // Approximate offset for bottom buttons
+        }
+    }
+
+    double zoom_w = (double)(view_w) / orig_w;
+    double zoom_h = (double)(view_h) / orig_h;
+    
+    // Prevent zooming past 100% on initial load
     ctx->zoom_level = std::min({1.0, zoom_w, zoom_h});
     
     ctx->pivot_orig_x = orig_w / 2.0;
     ctx->pivot_orig_y = orig_h / 2.0;
     ctx->mouse_view_x = (orig_w * ctx->zoom_level) / 2.0;
     ctx->mouse_view_y = (orig_h * ctx->zoom_level) / 2.0;
+}
+
+static void on_scrolled_size_allocate(GtkWidget* widget, GtkAllocation* allocation, gpointer data) {
+    ImageContext* ctx = static_cast<ImageContext*>(data);
+    // Fit image to real dimensions on first window render
+    if (!ctx->initial_fit_done && allocation->width > 1 && allocation->height > 1) {
+        ctx->initial_fit_done = true;
+        reset_zoom_to_fit(ctx);
+        apply_zoom_sync(ctx);
+    }
 }
 
 static gboolean on_button_press(GtkWidget* widget, GdkEventButton* event, gpointer data) {
@@ -271,6 +281,38 @@ static gboolean on_viewer_key_press(GtkWidget* widget, GdkEventKey* event, gpoin
     } else if (event->keyval == GDK_KEY_Right) {
         if (gtk_widget_get_sensitive(ctx->next_button)) on_next_clicked(NULL, ctx);
         return TRUE;
+    } else if (event->keyval == GDK_KEY_Delete || event->keyval == GDK_KEY_KP_Delete) {
+        if (ctx->callbacks.deleteByFilename) {
+            int currentIndex = ctx->callbacks.visibleIndexForFilename(ctx->filename);
+            
+            if (ctx->callbacks.deleteByFilename(ctx->filename, GTK_WINDOW(ctx->viewer_window))) {
+                const ResultData* newResult = ctx->callbacks.visibleAt(currentIndex);
+                if (!newResult && currentIndex > 0) {
+                    newResult = ctx->callbacks.visibleAt(currentIndex - 1); 
+                }
+                
+                if (newResult) {
+                    ctx->filename = newResult->filename;
+                    ctx->isBlurry = newResult->isBlurry;
+                    load_current_image(ctx);
+                    if (ctx->callbacks.selectVisibleRow) {
+                        ctx->callbacks.selectVisibleRow(ctx->callbacks.visibleIndexForFilename(ctx->filename));
+                    }
+                } else {
+                    gtk_widget_destroy(ctx->viewer_window);
+                }
+            }
+        }
+        return TRUE;
+    } else if (event->keyval == GDK_KEY_F11) {
+        if (ctx->is_fullscreen) {
+            gtk_window_unfullscreen(GTK_WINDOW(ctx->viewer_window));
+            ctx->is_fullscreen = false;
+        } else {
+            gtk_window_fullscreen(GTK_WINDOW(ctx->viewer_window));
+            ctx->is_fullscreen = true;
+        }
+        return TRUE;
     }
     return FALSE;
 }
@@ -291,10 +333,17 @@ void open_image_viewer(GtkWindow* parent, const ResultData& result, ImageViewerC
 
     ctx->viewer_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_transient_for(GTK_WINDOW(ctx->viewer_window), parent);
-    gtk_window_set_modal(GTK_WINDOW(ctx->viewer_window), TRUE);
+    // Allow window to be resized
+    gtk_window_set_resizable(GTK_WINDOW(ctx->viewer_window), TRUE);
 
-    ViewerBounds bounds = get_viewer_bounds(GTK_WINDOW(ctx->viewer_window));
-    gtk_window_set_default_size(GTK_WINDOW(ctx->viewer_window), bounds.imageWidth, bounds.imageHeight);
+    // Explicitly enable window decorations (title bar with buttons)
+    gtk_window_set_decorated(GTK_WINDOW(ctx->viewer_window), TRUE);
+
+    // Set default size, this size will be used when the window is un-maximized
+    gtk_window_set_default_size(GTK_WINDOW(ctx->viewer_window), 1024, 768);
+    
+    // Maximize window by default
+    gtk_window_maximize(GTK_WINDOW(ctx->viewer_window));
 
     g_signal_connect(ctx->viewer_window, "destroy", G_CALLBACK(on_viewer_destroy), ctx);
     g_signal_connect(ctx->viewer_window, "key-press-event", G_CALLBACK(on_viewer_key_press), ctx);
@@ -323,6 +372,8 @@ void open_image_viewer(GtkWindow* parent, const ResultData& result, ImageViewerC
     ctx->scrolled = gtk_scrolled_window_new(NULL, NULL);
     GtkStyleContext *scrolled_style = gtk_widget_get_style_context(ctx->scrolled);
     gtk_style_context_add_class(scrolled_style, "view");
+
+    g_signal_connect(ctx->scrolled, "size-allocate", G_CALLBACK(on_scrolled_size_allocate), ctx);
 
     gtk_container_add(GTK_CONTAINER(ctx->scrolled), event_box);
     gtk_box_pack_start(GTK_BOX(vbox), ctx->scrolled, TRUE, TRUE, 0);
