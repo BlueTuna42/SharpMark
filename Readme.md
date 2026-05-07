@@ -42,6 +42,27 @@ Ready-to-use binaries are available on the [Releases](../../releases) page.
 
 ---
 
+## Running with Nix
+
+If you use [Nix](https://nixos.org/) with flakes enabled, you can run SharpMark instantly without manually installing dependencies.
+
+To run the application directly from GitHub:
+```bash
+nix run github:bluetuna42/SharpMark
+```
+
+If you have cloned the repository locally, you can run:
+```bash
+nix run .
+```
+
+To enter a development shell with all necessary build dependencies and tools (like `gdb`, `cmake`, `pkg-config`):
+```bash
+nix develop
+```
+
+---
+
 ## Building from Source
 
 To compile the application from source, follow the instructions below.
@@ -64,7 +85,7 @@ The following tools and libraries are required to build SharpMark:
    ```
 2. Clone the repository and configure the build environment:
    ```bash
-   git clone https://github.com/yourusername/SharpMark.git
+   git clone https://github.com/bluetuna42/SharpMark.git
    cd SharpMark
    mkdir build && cd build
    
@@ -93,7 +114,7 @@ For Windows environments, the project is configured to build using the **MSYS2 U
    ```
 3. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/SharpMark.git
+   git clone https://github.com/bluetuna42/SharpMark.git
    cd SharpMark
    ```
 4. Execute the automated portable build script. This will compile the application and bundle it with all required GTK DLLs, image parsing libraries, themes, and icons into a standalone directory:
