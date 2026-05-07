@@ -137,3 +137,23 @@ if(NOT TARGET uninstall)
     add_custom_target(uninstall
         COMMAND ${CMAKE_COMMAND} -P "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake")
 endif()
+
+# --- CPack Configuration for Debian Package ---
+if(UNIX AND NOT APPLE)
+    set(CPACK_GENERATOR "DEB")
+    
+    # Debian package names are typically lowercase
+    set(CPACK_PACKAGE_NAME "sharpmark") 
+    set(CPACK_PACKAGE_VERSION "1.0.0")
+    
+    # Required field for .deb packages (maintainer info)
+    set(CPACK_PACKAGE_CONTACT "BlueTuna <azimuthsouth5@gmail.com>") 
+    
+    # Short description extracted from your .desktop file
+    set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Fast Image Sharpness Analyzer and Culling Tool")
+    
+    # Enable automatic dependency detection
+    set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+    
+    include(CPack)
+endif()
