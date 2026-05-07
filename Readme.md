@@ -71,7 +71,13 @@ The following tools and libraries are required to build SharpMark:
    cmake -G Ninja -DCMAKE_BUILD_TYPE=Release ..
    ninja
    ```
-3. **(Optional)** Generate a redistributable `.deb` package:
+3. Install the application to your system (requires root privileges):
+   ```bash
+   sudo ninja install
+   ```
+   *This will copy the executable, desktop entry, and icons to your system directories, allowing you to launch SharpMark from your application menu.*
+
+4. **(Optional)** Generate a redistributable `.deb` package:
    ```bash
    cpack -G DEB
    ```
