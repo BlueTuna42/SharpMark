@@ -27,12 +27,13 @@
           default = pkgs.stdenv.mkDerivation {
             pname = "sharpmark";
             version = "1.0.0";
+            
             src = ./.;
 
             nativeBuildInputs = with pkgs; [
               cmake
               pkg-config
-              wrapGAppsHook # Required for GTK apps to handle icons/schemas
+              wrapGAppsHook3 # Required for GTK apps to handle icons/schemas
             ];
 
             buildInputs = with pkgs; [
@@ -53,6 +54,14 @@
           };
         });
 
+      # Apps output allows running the app directly with 'nix run'
+      apps = forAllSystems (system: {
+        default = {
+          type = "app";
+          program = "${self.packages.${system}.default}/bin/SharpMark";
+        };
+      });
+
       # Development shell (active with 'nix develop')
       devShells = forAllSystems (system:
         let
@@ -60,15 +69,17 @@
         in
         {
           default = pkgs.mkShell {
-            # Includes dependencies needed for local development and compilation
-            buildInputs = with pkgs; [
-              cmake
-              pkg-config
-              gtk3
-              libraw
+            # Automatically include all inputs from the default package
+            inputsFrom = [ self.packages.${system}.default ];
+            
+            # Additional tools for local development
+            nativeBuildInputs = with pkgs; [
               gdb
             ];
           };
         });
+
+      # Formatter for 'nix fmt'
+      formatter = forAllSystems (system: nixpkgsFor.${system}.nixpkgs-fmt);
     };
 }
