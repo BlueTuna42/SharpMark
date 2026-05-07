@@ -1,8 +1,9 @@
 [Desktop Entry]
-Type=Application
+Version=1.0.0
 Name=SharpMark
-Comment=Image sharpness analysis application
+Comment=Fast Image Sharpness Analyzer and Culling Tool
 Exec=SharpMark
 Icon=sharpmark
 Terminal=false
-Categories=Utility;Graphics;
+Type=Application
+Categories=Graphics;Photography;Utility;

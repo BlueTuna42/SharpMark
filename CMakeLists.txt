@@ -127,3 +127,13 @@ if(UNIX AND NOT APPLE)
     #         DESTINATION share/icons/hicolor/scalable/apps 
     #         RENAME sharpmark.svg)
 endif()
+
+if(NOT TARGET uninstall)
+    configure_file(
+        "cmake_uninstall.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
+        IMMEDIATE @ONLY)
+
+    add_custom_target(uninstall
+        COMMAND ${CMAKE_COMMAND} -P "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake")
+endif()
