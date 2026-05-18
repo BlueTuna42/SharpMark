@@ -2,12 +2,73 @@
 
 #include "../utils/path_utils.h"
 #include "preview_loader.h"
-
+#include "../../img_tools/laplacian.h"
+#include <gtk/gtk.h>
+#include <string>
+#include <vector>
 #include <algorithm>
 #include <cmath>
-#include <gdk/gdkkeysyms.h>
-#include <utility>
+#include <filesystem>
 
+// Laplacian to Pixbuf Rendering
+// Converts a raw float Laplacian matrix into an 8-bit visible image
+static GdkPixbuf* render_laplacian_to_pixbuf(const GrayscaleImage& lapImg) {
+    int w = lapImg.width;
+    int h = lapImg.height;
+    
+    GdkPixbuf* pixbuf = gdk_pixbuf_new(GDK_COLORSPACE_RGB, FALSE, 8, w, h);
+    if (!pixbuf) return nullptr;
+    
+    int rowstride = gdk_pixbuf_get_rowstride(pixbuf);
+    guchar* pixels = gdk_pixbuf_get_pixels(pixbuf);
+    
+    float maxVal = 0.001f;
+    int totalPixels = w * h;
+    for (int i = 0; i < totalPixels; ++i) {
+        float val = std::abs(lapImg.data[i]);
+        if (val > maxVal) maxVal = val;
+    }
+    
+    // Threshold set low to ensure faint focus edges are brightly visible
+    float viewThreshold = maxVal * 0.15f; 
+    
+    for (int y = 0; y < h; ++y) {
+        guchar* row = pixels + y * rowstride;
+        int imgOffset = y * w;
+        for (int x = 0; x < w; ++x) {
+            float val = std::abs(lapImg.data[imgOffset + x]);
+            
+            float normalized = (val / viewThreshold) * 255.0f;
+            if (normalized > 255.0f) normalized = 255.0f;
+            
+            guchar pixelVal = static_cast<guchar>(normalized);
+            row[x * 3 + 0] = pixelVal;
+            row[x * 3 + 1] = pixelVal;
+            row[x * 3 + 2] = pixelVal;
+        }
+    }
+    return pixbuf;
+}
+
+// Attempts to find and load the .rawlap cache file for the given image
+static GdkPixbuf* load_laplacian_pixbuf(const std::string& originalFilepath) {
+#ifdef _WIN32
+    std::filesystem::path origPath = std::filesystem::u8path(originalFilepath);
+#else
+    std::filesystem::path origPath(originalFilepath);
+#endif
+    std::filesystem::path cacheFile = origPath.parent_path() / ".laplacian_cache" / (origPath.filename().string() + ".rawlap");
+    
+    if (std::filesystem::exists(cacheFile)) {
+        auto lapImg = LaplacianProcessor::loadLaplacian(cacheFile.string());
+        if (lapImg) {
+            return render_laplacian_to_pixbuf(*lapImg);
+        }
+    }
+    return nullptr;
+}
+
+// Viewer Implementation
 struct ImageContext {
     std::string filename;
     bool isBlurry = false;
@@ -16,11 +77,14 @@ struct ImageContext {
     GtkWidget *scrolled = nullptr; 
     GtkWidget *previous_button = nullptr;
     GtkWidget *next_button = nullptr;
+    GtkWidget *laplacian_toggle = nullptr;
     ImageViewerCallbacks callbacks;
 
     GdkPixbuf *original_pixbuf = nullptr; 
     double zoom_level = 1.0;
     
+    bool show_laplacian = false;
+
     // Panning state
     bool is_dragging = false;
     double drag_last_x = 0.0;
@@ -53,7 +117,7 @@ static gboolean on_draw(GtkWidget* widget, cairo_t* cr, gpointer data) {
     cairo_save(cr);
     cairo_scale(cr, ctx->zoom_level, ctx->zoom_level);
     gdk_cairo_set_source_pixbuf(cr, ctx->original_pixbuf, 0, 0);
-    
+
     cairo_pattern_set_filter(cairo_get_source(cr), 
         ctx->zoom_level >= 1.0 ? CAIRO_FILTER_NEAREST : CAIRO_FILTER_BILINEAR);
 
@@ -71,7 +135,7 @@ static void apply_zoom_sync(ImageContext* ctx) {
 
     int new_w = std::max(1, static_cast<int>(std::round(orig_w * ctx->zoom_level)));
     int new_h = std::max(1, static_cast<int>(std::round(orig_h * ctx->zoom_level)));
-    
+
     gtk_widget_set_size_request(ctx->drawing_area, new_w, new_h);
     gtk_widget_queue_draw(ctx->drawing_area);
 
@@ -109,10 +173,10 @@ static void reset_zoom_to_fit(ImageContext* ctx) {
 
     double zoom_w = (double)(view_w) / orig_w;
     double zoom_h = (double)(view_h) / orig_h;
-    
+
     // Prevent zooming past 100% on initial load
     ctx->zoom_level = std::min({1.0, zoom_w, zoom_h});
-    
+
     ctx->pivot_orig_x = orig_w / 2.0;
     ctx->pivot_orig_y = orig_h / 2.0;
     ctx->mouse_view_x = (orig_w * ctx->zoom_level) / 2.0;
@@ -140,7 +204,7 @@ static gboolean on_button_press(GtkWidget* widget, GdkEventButton* event, gpoint
         ctx->is_dragging = true;
         ctx->drag_last_x = event->x_root;
         ctx->drag_last_y = event->y_root;
-        
+
         GdkWindow *window = gtk_widget_get_window(widget);
         if (window) {
             GdkCursor *cursor = gdk_cursor_new_from_name(gdk_window_get_display(window), "grabbing");
@@ -191,7 +255,7 @@ static gboolean on_viewer_scroll(GtkWidget* widget, GdkEventScroll* event, gpoin
 
         ctx->pivot_orig_x = event->x / ctx->zoom_level;
         ctx->pivot_orig_y = event->y / ctx->zoom_level;
-        
+
         ctx->mouse_view_x = event->x - gtk_adjustment_get_value(hadj);
         ctx->mouse_view_y = event->y - gtk_adjustment_get_value(vadj);
 
@@ -222,13 +286,26 @@ static void load_current_image(ImageContext* ctx) {
         ctx->original_pixbuf = nullptr;
     }
 
-    ctx->original_pixbuf = load_preview_pixbuf(ctx->filename, 8192, 8192);
+    // Try loading Laplacian map if toggled
+    if (ctx->show_laplacian) {
+        ctx->original_pixbuf = load_laplacian_pixbuf(ctx->filename);
+        if (!ctx->original_pixbuf) {
+            // Uncheck the toggle if the technical map file is missing
+            gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(ctx->laplacian_toggle), FALSE);
+            ctx->show_laplacian = false;
+        }
+    }
+
+    // Default to the original image preview
+    if (!ctx->show_laplacian) {
+        ctx->original_pixbuf = load_preview_pixbuf(ctx->filename, 8192, 8192);
+    }
 
     if (ctx->original_pixbuf) {
         int w = gdk_pixbuf_get_width(ctx->original_pixbuf);
         int h = gdk_pixbuf_get_height(ctx->original_pixbuf);
         int dynamicBorder = std::max(8, std::min(w, h) / 100);
-        
+
         ctx->original_pixbuf = add_status_border(ctx->original_pixbuf, ctx->isBlurry, dynamicBorder);
 
         reset_zoom_to_fit(ctx);
@@ -237,7 +314,9 @@ static void load_current_image(ImageContext* ctx) {
         gtk_widget_queue_draw(ctx->drawing_area);
     }
 
+    // Append technical tag to window title if Laplacian mode is active
     std::string title = path_filename(ctx->filename) + (ctx->isBlurry ? " (Blurry)" : " (Sharp)");
+    if (ctx->show_laplacian) title += " [LAPLACIAN CACHE]";
     gtk_window_set_title(GTK_WINDOW(ctx->viewer_window), title.c_str());
     update_viewer_navigation_state(ctx);
 }
@@ -284,13 +363,13 @@ static gboolean on_viewer_key_press(GtkWidget* widget, GdkEventKey* event, gpoin
     } else if (event->keyval == GDK_KEY_Delete || event->keyval == GDK_KEY_KP_Delete) {
         if (ctx->callbacks.deleteByFilename) {
             int currentIndex = ctx->callbacks.visibleIndexForFilename(ctx->filename);
-            
+
             if (ctx->callbacks.deleteByFilename(ctx->filename, GTK_WINDOW(ctx->viewer_window))) {
                 const ResultData* newResult = ctx->callbacks.visibleAt(currentIndex);
                 if (!newResult && currentIndex > 0) {
                     newResult = ctx->callbacks.visibleAt(currentIndex - 1); 
                 }
-                
+
                 if (newResult) {
                     ctx->filename = newResult->filename;
                     ctx->isBlurry = newResult->isBlurry;
@@ -341,7 +420,7 @@ void open_image_viewer(GtkWindow* parent, const ResultData& result, ImageViewerC
 
     // Set default size, this size will be used when the window is un-maximized
     gtk_window_set_default_size(GTK_WINDOW(ctx->viewer_window), 1024, 768);
-    
+
     // Maximize window by default
     gtk_window_maximize(GTK_WINDOW(ctx->viewer_window));
 
@@ -356,7 +435,7 @@ void open_image_viewer(GtkWindow* parent, const ResultData& result, ImageViewerC
 
     GtkWidget *event_box = gtk_event_box_new();
     gtk_container_add(GTK_CONTAINER(event_box), ctx->drawing_area);
-    
+
     gtk_widget_set_hexpand(event_box, TRUE);
     gtk_widget_set_vexpand(event_box, TRUE);
     gtk_widget_set_halign(event_box, GTK_ALIGN_CENTER);
@@ -384,6 +463,14 @@ void open_image_viewer(GtkWindow* parent, const ResultData& result, ImageViewerC
     ctx->previous_button = gtk_button_new_with_label("Previous");
     g_signal_connect(ctx->previous_button, "clicked", G_CALLBACK(on_previous_clicked), ctx);
     gtk_box_pack_start(GTK_BOX(button_box), ctx->previous_button, TRUE, TRUE, 0);
+
+    ctx->laplacian_toggle = gtk_toggle_button_new_with_label("Show Laplacian Edge Map");
+    gtk_box_pack_start(GTK_BOX(button_box), ctx->laplacian_toggle, TRUE, TRUE, 0);
+    g_signal_connect(ctx->laplacian_toggle, "toggled", G_CALLBACK(+[](GtkToggleButton* btn, gpointer data) {
+        ImageContext* ctx = static_cast<ImageContext*>(data);
+        ctx->show_laplacian = gtk_toggle_button_get_active(btn);
+        load_current_image(ctx); // Triggers visual mode switch
+    }), ctx);
 
     ctx->next_button = gtk_button_new_with_label("Next");
     g_signal_connect(ctx->next_button, "clicked", G_CALLBACK(on_next_clicked), ctx);
