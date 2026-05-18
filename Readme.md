@@ -17,10 +17,10 @@ Built with C++ and GTK3, the tool delivers a consistent native experience across
 * **Native Graphical Interface:** A responsive GTK3-based GUI offering dynamic List and Grid view modes, `Ctrl + Scroll` thumbnail scaling, and system-aware dark/light theme integration.
 * **High Performance:** Multi-threaded architecture designed to quickly parse and analyze large batches of high-resolution images.
 * **Accurate Blur Detection:** Evaluates focal sharpness mathematically using Laplacian variance.
+* **Smart Laplacian Caching:** Optionally saves and reuses computed technical Laplacian edge maps as lossless binaries, enabling near-instantaneous re-scans of previously analyzed folders and allowing users to visualize the exact edge data the algorithm sees in the built-in viewer.
 * **Advanced RAW Support:** Powered by LibRaw, featuring configurable RAW loading modes (Full-size, Half-size, or Preview) to balance computational accuracy and processing speed.
 * **Optional Metadata Tagging:** Powered by libexif, the application can be configured to automatically write standard star ratings to image metadata (1-star for blurry, 5-star for sharp) for immediate integration with Lightroom, Capture One, and darktable.
 * **Efficient File Management:** Includes bulk deletion capabilities to immediately move out-of-focus shots to the system trash.
-
 ---
 
 ## Installation (Pre-compiled Releases)
