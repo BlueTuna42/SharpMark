@@ -30,10 +30,14 @@ public:
         gui.SetCurrentDirectory(dirpath);
         gui.ResetProgress(totalFiles);
 
-        std::ofstream log("BlurryList.txt");
+#ifdef _WIN32
+        std::ofstream log("NUL");
+#else
+        std::ofstream log("/dev/null");
+#endif
+
         if (!log.is_open()) {
-            std::cerr << "Failed to open BlurryList.txt for writing." << std::endl;
-            return false;
+            std::cerr << "Failed to open dummy log stream." << std::endl;
         }
 
 #ifdef DEBUG_BENCHMARK
