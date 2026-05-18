@@ -28,6 +28,7 @@ struct GUIContext {
     GtkWidget *folder_label = nullptr;
     GtkWidget *sort_combo = nullptr;
     GtkWidget *button_delete_blurry = nullptr;
+    GtkWidget *button_clear_cache = nullptr; 
     GtkWidget *progress_bar = nullptr;
     GtkWidget *summary_box = nullptr;
     GtkWidget *summary_sharp_label = nullptr;

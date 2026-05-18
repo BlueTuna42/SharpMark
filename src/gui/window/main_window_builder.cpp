@@ -97,6 +97,12 @@ static void build_directory_bar(GUIContext& ctx, GtkWidget* vbox, const MainWind
     g_signal_connect(ctx.button_delete_blurry, "clicked", callbacks.deleteBlurryClicked, NULL);
     gtk_box_pack_start(GTK_BOX(ctx.directory_box), ctx.button_delete_blurry, FALSE, FALSE, 0);
 
+    // Clear cache button
+    ctx.button_clear_cache = gtk_button_new_with_label("Clear cache");
+    gtk_widget_set_tooltip_text(ctx.button_clear_cache, "Deletes the .laplacian_cache folder to free up space");
+    g_signal_connect(ctx.button_clear_cache, "clicked", callbacks.clearCacheClicked, NULL);
+    gtk_box_pack_start(GTK_BOX(ctx.directory_box), ctx.button_clear_cache, FALSE, FALSE, 0);
+
     gtk_widget_hide(ctx.directory_box);
 }
 

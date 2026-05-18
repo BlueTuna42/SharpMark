@@ -12,6 +12,7 @@ struct MainWindowCallbacks {
     GCallback recheckClicked = nullptr;
     GCallback sortChanged = nullptr;
     GCallback deleteBlurryClicked = nullptr;
+    GCallback clearCacheClicked = nullptr;
     GCallback resultRowActivated = nullptr;
     GCallback resultListKeyPress = nullptr;
     GCallback summaryDraw = nullptr;

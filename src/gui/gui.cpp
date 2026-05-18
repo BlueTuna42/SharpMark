@@ -16,6 +16,7 @@
 #include <thread>
 #include <mutex>
 #include <string>
+#include <filesystem>
 
 struct DirectoryData {
     std::string dirpath;
@@ -39,6 +40,7 @@ static void on_result_row_activated(GtkListBox* box, GtkListBoxRow* row, gpointe
 static void on_delete_blurry_clicked(GtkButton* button, gpointer data);
 static void on_view_mode_combo_changed(GtkComboBox* combo, gpointer data);
 static void on_flow_box_child_activated(GtkFlowBox* box, GtkFlowBoxChild* child, gpointer data);
+static void on_clear_cache_clicked(GtkButton* button, gpointer data);
 
 // Result list helpers
 
@@ -126,6 +128,18 @@ static void show_directory_controls(const std::string& dirpath) {
     gtk_widget_show(g_ctx->folder_label);
     gtk_widget_show(g_ctx->sort_combo);
     gtk_widget_show(g_ctx->button_delete_blurry);
+    
+    gtk_widget_show(g_ctx->button_clear_cache);
+    
+#ifdef _WIN32
+    std::filesystem::path cacheDir = std::filesystem::u8path(dirpath) / ".laplacian_cache";
+#else
+    std::filesystem::path cacheDir = std::filesystem::path(dirpath) / ".laplacian_cache";
+#endif
+    std::error_code ec;
+    bool cacheExists = std::filesystem::exists(cacheDir, ec);
+    gtk_widget_set_sensitive(g_ctx->button_clear_cache, cacheExists);
+
     gtk_widget_show(g_ctx->directory_box);
     gtk_widget_show(g_ctx->view_mode_combo);
     if (g_ctx->button_recheck) {
@@ -368,6 +382,50 @@ static bool focus_first_result_row() {
 }
 
 // Input callbacks
+
+static void on_clear_cache_clicked(GtkButton* button, gpointer data) {
+    std::string dirpath;
+    {
+        std::lock_guard<std::mutex> lock(g_ctx->mtx);
+        dirpath = g_ctx->currentDir;
+    }
+    
+    if (dirpath.empty() || g_ctx->scanInProgress) return;
+
+#ifdef _WIN32
+    std::filesystem::path cacheDir = std::filesystem::u8path(dirpath) / ".laplacian_cache";
+#else
+    std::filesystem::path cacheDir = std::filesystem::path(dirpath) / ".laplacian_cache";
+#endif
+
+    std::error_code ec;
+    if (std::filesystem::exists(cacheDir, ec)) {
+        GtkWidget* dialog = gtk_message_dialog_new(GTK_WINDOW(g_ctx->window),
+            GTK_DIALOG_MODAL,
+            GTK_MESSAGE_QUESTION,
+            GTK_BUTTONS_YES_NO,
+            "Delete Laplacian cache folder?\n\nThis will free up disk space, but the next scan of this folder will take longer.");
+        
+        int response = gtk_dialog_run(GTK_DIALOG(dialog));
+        gtk_widget_destroy(dialog);
+        
+        if (response == GTK_RESPONSE_YES) {
+            std::uintmax_t deletedFiles = std::filesystem::remove_all(cacheDir, ec);
+            
+            if (!ec) {
+                GtkWidget* success_dialog = gtk_message_dialog_new(GTK_WINDOW(g_ctx->window),
+                    GTK_DIALOG_MODAL,
+                    GTK_MESSAGE_INFO,
+                    GTK_BUTTONS_OK,
+                    "Cache deleted successfully.");
+                gtk_dialog_run(GTK_DIALOG(success_dialog));
+                gtk_widget_destroy(success_dialog);
+                
+                gtk_widget_set_sensitive(g_ctx->button_clear_cache, FALSE);
+            }
+        }
+    }
+}
 
 static gboolean on_result_list_key_press(GtkWidget* widget, GdkEventKey* event, gpointer data) {
     if ((event->state & GDK_CONTROL_MASK) && (event->keyval == GDK_KEY_a || event->keyval == GDK_KEY_A)) {
@@ -704,6 +762,7 @@ static void run_gtk_thread() {
         G_CALLBACK(on_recheck_button_clicked),
         G_CALLBACK(on_sort_combo_changed),
         G_CALLBACK(on_delete_blurry_clicked),
+        G_CALLBACK(on_clear_cache_clicked),
         G_CALLBACK(on_result_row_activated),
         G_CALLBACK(on_result_list_key_press),
         G_CALLBACK(on_summary_draw),
