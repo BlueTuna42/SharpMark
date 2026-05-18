@@ -98,25 +98,70 @@ public:
 
     int processFile(const std::string& file, std::ofstream& log, VisualGUI& gui) {
     AppSettings settings = gui.GetSettings();
+    double maxVariance = 0.0;
+    
+    // Convert path using UTF-8 to avoid issues with special characters
+#ifdef _WIN32
+    std::filesystem::path origPath = std::filesystem::u8path(file);
+#else
+    std::filesystem::path origPath(file);
+#endif
+    
+    // Cache path
+    std::filesystem::path cacheDir = origPath.parent_path() / ".laplacian_cache";
+    std::filesystem::path cacheFile = cacheDir / (origPath.filename().string() + ".rawlap");
+
+    bool usedCache = false;
 
 #ifdef DEBUG_BENCHMARK
     auto ts_read = std::chrono::high_resolution_clock::now();
-#endif
-    
-    // Pass rawMode to readImage. ImageIO must be updated to handle the int format.
-    auto image = ImageIO::readImage(file, settings.rawMode); 
-    if (!image) return -1;
-
-#ifdef DEBUG_BENCHMARK
-    auto te_read = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> t_read(0);
     auto ts_laplace = std::chrono::high_resolution_clock::now();
 #endif
 
-    double maxVariance = LaplacianProcessor::evaluateSharpness(*image, 5, 5);
+    // 1. Attempt to load from cache
+    if (settings.cacheLaplacian && std::filesystem::exists(cacheFile)) {
+        auto lapImg = LaplacianProcessor::loadLaplacian(cacheFile.string());
+        if (lapImg) {
+#ifdef DEBUG_BENCHMARK
+            auto te_read = std::chrono::high_resolution_clock::now();
+            t_read = te_read - ts_read;
+            ts_laplace = std::chrono::high_resolution_clock::now();
+#endif
+            maxVariance = LaplacianProcessor::evaluateSharpnessFromLaplacian(*lapImg, 5, 5);
+            usedCache = true;
+        }
+    }
+
+    // 2. If no cache exists, read the image and process it
+    if (!usedCache) {
+        auto image = ImageIO::readImage(file, settings.rawMode); 
+        if (!image) return -1;
+
+#ifdef DEBUG_BENCHMARK
+        auto te_read = std::chrono::high_resolution_clock::now();
+        t_read = te_read - ts_read;
+        ts_laplace = std::chrono::high_resolution_clock::now();
+#endif
+
+        if (settings.cacheLaplacian) {
+            auto lapImg = LaplacianProcessor::applyLaplacian(*image);
+            maxVariance = LaplacianProcessor::evaluateSharpnessFromLaplacian(*lapImg, 5, 5);
+            
+            // Safe directory creation across threads
+            std::error_code ec;
+            if (!std::filesystem::exists(cacheDir, ec)) {
+                std::filesystem::create_directories(cacheDir, ec);
+            }
+            
+            LaplacianProcessor::saveLaplacian(*lapImg, cacheFile.string());
+        } else {
+            maxVariance = LaplacianProcessor::evaluateSharpness(*image, 5, 5);
+        }
+    }
 
 #ifdef DEBUG_BENCHMARK
     auto te_laplace = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double, std::milli> t_read = te_read - ts_read;
     std::chrono::duration<double, std::milli> t_laplace = te_laplace - ts_laplace;
 #endif
 
@@ -130,31 +175,30 @@ public:
         }
     }
 
+    gui.AddResult(file, isBlurry);
 
-        gui.AddResult(file, isBlurry);
-
-        std::lock_guard<std::mutex> lock(output_mutex);
+    std::lock_guard<std::mutex> lock(output_mutex);
 
 #ifdef DEBUG_BENCHMARK
-        std::cout << "\nFile: " << file << std::endl;
-        std::cout << "  [READ]      Time: " << t_read.count() << " ms" << std::endl;
-        std::cout << "  [LAPLACIAN] Time: " << t_laplace.count() << " ms" << std::endl;
-        std::cout << "  [DATA]      Var:  " << maxVariance << std::endl;
+    std::cout << "\nFile: " << file << (usedCache ? " (CACHED)" : "") << std::endl;
+    std::cout << "  [READ]      Time: " << t_read.count() << " ms" << std::endl;
+    std::cout << "  [LAPLACIAN] Time: " << t_laplace.count() << " ms" << std::endl;
+    std::cout << "  [DATA]      Var:  " << maxVariance << std::endl;
 #endif
 
-        if (isBlurry) {
+    if (isBlurry) {
 #ifndef DEBUG_BENCHMARK
-            std::cout << file << " is blurry" << std::endl;
+        std::cout << file << " is blurry" << std::endl;
 #endif
-            log << file << std::endl;
-        } else {
+        log << file << std::endl;
+    } else {
 #ifndef DEBUG_BENCHMARK
-            std::cout << file << " is sharp" << std::endl;
+        std::cout << file << " is sharp" << std::endl;
 #endif
-        }
-
-        return isBlurry ? 1 : 0;
     }
+
+    return isBlurry ? 1 : 0;
+}
 };
 
 int main(int argc, char** argv) {

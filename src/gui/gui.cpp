@@ -647,7 +647,12 @@ static void on_settings_clicked(GtkWidget* widget, gpointer data) {
     GtkWidget *exif_check = gtk_check_button_new_with_label("Write EXIF rating based on sharpness");
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(exif_check), g_ctx->settings.writeExif);
     gtk_grid_attach(GTK_GRID(grid), exif_check, 0, 1, 2, 1);
-    
+
+    // Laplacian cache toggle
+    GtkWidget *cache_check = gtk_check_button_new_with_label("Save and reuse technical Laplacian data (faster re-scans)");
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(cache_check), g_ctx->settings.cacheLaplacian);
+    gtk_grid_attach(GTK_GRID(grid), cache_check, 0, 2, 2, 1); 
+
     // RAW open mode
     GtkWidget *raw_label = gtk_label_new("Open RAW images:");
     gtk_widget_set_halign(raw_label, GTK_ALIGN_START);
@@ -657,20 +662,23 @@ static void on_settings_clicked(GtkWidget* widget, gpointer data) {
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(raw_combo), "Preview");
     gtk_combo_box_set_active(GTK_COMBO_BOX(raw_combo), g_ctx->settings.rawMode);
     
-    gtk_grid_attach(GTK_GRID(grid), raw_label, 0, 2, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), raw_combo, 1, 2, 1, 1);
+    // Adjusted coordinates: moved RAW combo to row 3 to prevent overlap
+    gtk_grid_attach(GTK_GRID(grid), raw_label, 0, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), raw_combo, 1, 3, 1, 1);
     
     gtk_widget_show_all(dialog);
     
     if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK) {
         int newThemeMode = gtk_combo_box_get_active(GTK_COMBO_BOX(theme_combo));
         bool newWriteExif = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(exif_check));
+        bool newCacheLaplacian = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(cache_check)); // Read checkbox state
         int newRawMode = gtk_combo_box_get_active(GTK_COMBO_BOX(raw_combo));
 
         {
             std::lock_guard<std::mutex> lock(g_ctx->mtx);
             g_ctx->settings.themeMode = newThemeMode;
             g_ctx->settings.writeExif = newWriteExif;
+            g_ctx->settings.cacheLaplacian = newCacheLaplacian;
             g_ctx->settings.rawMode = newRawMode;
         }
 

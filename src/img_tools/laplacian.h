@@ -2,6 +2,9 @@
 #define LAPLACIAN_H
 
 #include "../struct.h"
+#include <fstream>
+#include <filesystem>
+#include <memory>
 
 class LaplacianProcessor {
 public:
@@ -10,6 +13,12 @@ public:
 
     // Evaluates sharpness using a grid (default 5x5) and returns the maximum block variance
     static double evaluateSharpness(const GrayscaleImage& img, int gridCols = 5, int gridRows = 5);
+
+    static std::unique_ptr<GrayscaleImage> applyLaplacian(const GrayscaleImage& img);
+    static double evaluateSharpnessFromLaplacian(const GrayscaleImage& lapImg, int gridCols = 5, int gridRows = 5);
+    
+    static bool saveLaplacian(const GrayscaleImage& lapImg, const std::string& filepath);
+    static std::unique_ptr<GrayscaleImage> loadLaplacian(const std::string& filepath);
 };
 
 #endif
