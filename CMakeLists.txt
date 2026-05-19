@@ -144,7 +144,7 @@ if(UNIX AND NOT APPLE)
     
     # Debian package names are typically lowercase
     set(CPACK_PACKAGE_NAME "sharpmark") 
-    set(CPACK_PACKAGE_VERSION "1.0.0")
+    set(CPACK_PACKAGE_VERSION "1.1.0")
     
     # Required field for .deb packages (maintainer info)
     set(CPACK_PACKAGE_CONTACT "BlueTuna <azimuthsouth5@gmail.com>") 

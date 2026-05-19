@@ -28,15 +28,15 @@ Built with C++ and GTK3, the tool delivers a consistent native experience across
 Ready-to-use binaries are available on the [Releases](../../releases) page.
 
 ### Windows (Portable)
-1. Navigate to the **Releases** tab and download `SharpMark_Portable.zip`.
+1. Navigate to the **Releases** tab and download `SharpMark-...-Portable.zip`.
 2. Extract the archive to your preferred directory.
 3. Execute `SharpMark.exe`. No installation is required.
 
 ### Linux (Debian / Ubuntu)
-1. Download the `.deb` package (e.g., `sharpmark_1.0.0_amd64.deb`) from the **Releases** tab.
+1. Download the `.deb` package (e.g., `sharpmark-1.0.0-amd64.deb`) from the **Releases** tab.
 2. Open your terminal and install the package via `apt` to automatically resolve GTK3 dependencies:
    ```bash
-   sudo apt install ./sharpmark_1.0.0_amd64.deb
+   sudo apt install ./sharpmark-1.0.0-amd64.deb
    ```
 3. Launch **SharpMark** from your desktop environment's application menu.
 
