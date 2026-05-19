@@ -38,12 +38,14 @@ static void build_top_bar(GUIContext& ctx, GtkWidget* vbox, const MainWindowCall
     gtk_widget_set_no_show_all(ctx.button_recheck, TRUE);
     gtk_widget_set_sensitive(ctx.button_recheck, FALSE);
     g_signal_connect(ctx.button_recheck, "clicked", callbacks.recheckClicked, NULL);
+    g_signal_connect(ctx.button_recheck, "key-press-event", callbacks.controlKeyPress, NULL);
     gtk_box_pack_start(GTK_BOX(ctx.top_button_box), ctx.button_recheck, FALSE, FALSE, 0);
     gtk_widget_hide(ctx.button_recheck);
 
     ctx.button_settings = gtk_button_new_from_icon_name("preferences-system-symbolic", GTK_ICON_SIZE_BUTTON);
     gtk_widget_set_tooltip_text(ctx.button_settings, "Settings");
     g_signal_connect(ctx.button_settings, "clicked", callbacks.settingsClicked, NULL);
+    g_signal_connect(ctx.button_settings, "key-press-event", callbacks.controlKeyPress, NULL);
     gtk_box_pack_start(GTK_BOX(ctx.top_button_box), ctx.button_settings, FALSE, FALSE, 0);
 }
 
@@ -81,6 +83,7 @@ static void build_directory_bar(GUIContext& ctx, GtkWidget* vbox, const MainWind
     gtk_combo_box_set_active(GTK_COMBO_BOX(ctx.sort_combo), static_cast<gint>(ctx.sortMode));
     gtk_widget_set_no_show_all(ctx.sort_combo, TRUE);
     g_signal_connect(ctx.sort_combo, "changed", callbacks.sortChanged, NULL);
+    g_signal_connect(ctx.sort_combo, "key-press-event", callbacks.controlKeyPress, NULL);
     gtk_box_pack_start(GTK_BOX(ctx.directory_box), ctx.sort_combo, FALSE, FALSE, 0);
 
     ctx.view_mode_combo = gtk_combo_box_text_new();
@@ -89,18 +92,21 @@ static void build_directory_bar(GUIContext& ctx, GtkWidget* vbox, const MainWind
     gtk_combo_box_set_active(GTK_COMBO_BOX(ctx.view_mode_combo), static_cast<gint>(ctx.viewMode));
     gtk_widget_set_no_show_all(ctx.view_mode_combo, TRUE);
     g_signal_connect(ctx.view_mode_combo, "changed", callbacks.viewModeChanged, NULL);
+    g_signal_connect(ctx.view_mode_combo, "key-press-event", callbacks.controlKeyPress, NULL);
     gtk_box_pack_start(GTK_BOX(ctx.directory_box), ctx.view_mode_combo, FALSE, FALSE, 0);
 
     ctx.button_delete_blurry = gtk_button_new_with_label("Delete blurry");
     gtk_widget_set_sensitive(ctx.button_delete_blurry, FALSE);
     gtk_style_context_add_class(gtk_widget_get_style_context(ctx.button_delete_blurry), "delete-button");
     g_signal_connect(ctx.button_delete_blurry, "clicked", callbacks.deleteBlurryClicked, NULL);
+    g_signal_connect(ctx.button_delete_blurry, "key-press-event", callbacks.controlKeyPress, NULL);
     gtk_box_pack_start(GTK_BOX(ctx.directory_box), ctx.button_delete_blurry, FALSE, FALSE, 0);
 
     // Clear cache button
     ctx.button_clear_cache = gtk_button_new_with_label("Clear cache");
     gtk_widget_set_tooltip_text(ctx.button_clear_cache, "Deletes the .laplacian_cache folder to free up space");
     g_signal_connect(ctx.button_clear_cache, "clicked", callbacks.clearCacheClicked, NULL);
+    g_signal_connect(ctx.button_clear_cache, "key-press-event", callbacks.controlKeyPress, NULL);
     gtk_box_pack_start(GTK_BOX(ctx.directory_box), ctx.button_clear_cache, FALSE, FALSE, 0);
 
     gtk_widget_hide(ctx.directory_box);
@@ -128,18 +134,26 @@ static void update_selection_css(GtkSettings *settings, GParamSpec *pspec, gpoin
         g_free(theme_name);
     }
 
-    const char* css = is_dark ? 
-        "#results-flow-box flowboxchild:selected,\n"
-        "#results-list-box row:selected {\n"
-        "  background-color: #f4f4f4;\n" 
-        "  color: #000000;\n"            
-        "  border-radius: 6px;\n"        
+    const char* css = is_dark ?
+        "#results-flow-box flowboxchild:selected:not(:focus) {\n"
+        "  background-color: transparent;\n"
+        "  color: inherit;\n"
+        "}\n"
+        "#results-flow-box flowboxchild:selected:focus,\n"
+        "#results-list-box row:selected:focus {\n"
+        "  background-color: #f4f4f4;\n"
+        "  color: #000000;\n"
+        "  border-radius: 6px;\n"
         "}\n" :
-        "#results-flow-box flowboxchild:selected,\n"
-        "#results-list-box row:selected {\n"
-        "  background-color: #d0d0d0;\n" 
-        "  color: #000000;\n"            
-        "  border-radius: 6px;\n"        
+        "#results-flow-box flowboxchild:selected:not(:focus) {\n"
+        "  background-color: transparent;\n"
+        "  color: inherit;\n"
+        "}\n"
+        "#results-flow-box flowboxchild:selected:focus,\n"
+        "#results-list-box row:selected:focus {\n"
+        "  background-color: #d0d0d0;\n"
+        "  color: #000000;\n"
+        "  border-radius: 6px;\n"
         "}\n";
         
     gtk_css_provider_load_from_data(provider, css, -1, NULL);
@@ -157,7 +171,6 @@ static void build_results_area(GUIContext& ctx, GtkWidget* vbox, const MainWindo
     gtk_container_add(GTK_CONTAINER(ctx.list_overlay), ctx.list_scrolled_window);
     gtk_widget_add_events(ctx.list_scrolled_window, GDK_SCROLL_MASK);
     g_signal_connect(ctx.list_scrolled_window, "scroll-event", callbacks.listScrollEvent, NULL);
-    g_signal_connect(ctx.list_box, "key-press-event", callbacks.resultListKeyPress, NULL);
     GtkWidget *view_stack = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_container_add(GTK_CONTAINER(ctx.list_scrolled_window), view_stack);
 

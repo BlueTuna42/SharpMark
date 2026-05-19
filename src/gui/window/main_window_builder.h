@@ -9,6 +9,7 @@ struct MainWindowCallbacks {
     GCallback windowDestroy = nullptr;
     GCallback selectClicked = nullptr;
     GCallback selectKeyPress = nullptr;
+    GCallback controlKeyPress = nullptr;
     GCallback recheckClicked = nullptr;
     GCallback sortChanged = nullptr;
     GCallback deleteBlurryClicked = nullptr;

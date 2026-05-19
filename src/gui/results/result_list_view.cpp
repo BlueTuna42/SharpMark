@@ -93,6 +93,7 @@ static GtkWidget* create_result_grid_item(const ResultListView& view, const Resu
     }
 
     GtkWidget* child = gtk_flow_box_child_new();
+    gtk_widget_set_can_focus(child, TRUE);
     g_object_set_data_full(G_OBJECT(child), "filename", g_strdup(result.filename.c_str()), g_free);
 
     GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
@@ -195,6 +196,21 @@ void result_list_view_rebuild(const ResultListView& view, const std::vector<cons
 }
 
 bool result_list_view_focus_first_row(const ResultListView& view) {
+    if (view.viewMode == 1) {
+        if (!view.flowBox) {
+            return false;
+        }
+
+        GtkFlowBoxChild* child = gtk_flow_box_get_child_at_index(GTK_FLOW_BOX(view.flowBox), 0);
+        if (!child) {
+            return false;
+        }
+
+        gtk_flow_box_select_child(GTK_FLOW_BOX(view.flowBox), child);
+        gtk_widget_grab_focus(GTK_WIDGET(child));
+        return true;
+    }
+
     if (!view.listBox) {
         return false;
     }

@@ -381,6 +381,43 @@ static bool focus_first_result_row() {
     return result_list_view_focus_first_row(current_result_list_view());
 }
 
+static void unselect_all_results() {
+    if (g_ctx->list_box) {
+        gtk_list_box_unselect_all(GTK_LIST_BOX(g_ctx->list_box));
+    }
+
+    if (g_ctx->flow_box) {
+        gtk_flow_box_unselect_all(GTK_FLOW_BOX(g_ctx->flow_box));
+    }
+}
+
+static bool can_focus_control(GtkWidget* widget) {
+    return widget &&
+           gtk_widget_get_visible(widget) &&
+           gtk_widget_get_sensitive(widget);
+}
+
+static std::vector<GtkWidget*> navigation_controls() {
+    return {
+        g_ctx->button_select,
+        g_ctx->sort_combo,
+        g_ctx->view_mode_combo,
+        g_ctx->button_delete_blurry,
+        g_ctx->button_clear_cache
+    };
+}
+
+static bool focus_first_results_toolbar_control() {
+    for (GtkWidget* control : navigation_controls()) {
+        if (control != g_ctx->button_select && can_focus_control(control)) {
+            gtk_widget_grab_focus(control);
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // Input callbacks
 
 static void on_clear_cache_clicked(GtkButton* button, gpointer data) {
@@ -477,8 +514,12 @@ static gboolean on_result_list_key_press(GtkWidget* widget, GdkEventKey* event, 
         }
 
         if (isFirstRow) {
-            gtk_widget_grab_focus(g_ctx->button_select);
-            return TRUE;
+            unselect_all_results();
+            if (g_ctx->button_select) {
+                gtk_widget_grab_focus(g_ctx->button_select);
+                return TRUE;
+            }
+            return FALSE;
         }
     }
     
@@ -503,11 +544,78 @@ static void on_result_delete_button_clicked(GtkButton* button, gpointer data) {
 }
 
 static gboolean on_select_button_key_press(GtkWidget* widget, GdkEventKey* event, gpointer data) {
+    if ((event->keyval == GDK_KEY_Down || event->keyval == GDK_KEY_KP_Down) &&
+        !(event->state & (GDK_CONTROL_MASK | GDK_MOD1_MASK))) {
+        if (focus_first_results_toolbar_control()) {
+            return TRUE;
+        }
+
+        return focus_first_result_row() ? TRUE : FALSE;
+    }
+
+    return FALSE;
+}
+
+static gboolean on_results_control_key_press(GtkWidget* widget, GdkEventKey* event, gpointer data) {
+    if (event->state & (GDK_CONTROL_MASK | GDK_MOD1_MASK)) {
+        return FALSE;
+    }
+
+    if (event->keyval == GDK_KEY_Up || event->keyval == GDK_KEY_KP_Up) {
+        if (g_ctx->button_select) {
+            gtk_widget_grab_focus(g_ctx->button_select);
+            return TRUE;
+        }
+
+        return FALSE;
+    }
+
     if (event->keyval == GDK_KEY_Down || event->keyval == GDK_KEY_KP_Down) {
         return focus_first_result_row() ? TRUE : FALSE;
     }
 
     return FALSE;
+}
+
+static void on_results_combo_move_active(GtkComboBox* combo, GtkScrollType scrollType, gpointer data) {
+    g_signal_stop_emission_by_name(combo, "move-active");
+
+    if (scrollType == GTK_SCROLL_STEP_UP ||
+        scrollType == GTK_SCROLL_PAGE_UP ||
+        scrollType == GTK_SCROLL_START) {
+        if (g_ctx->button_select) {
+            gtk_widget_grab_focus(g_ctx->button_select);
+        }
+        return;
+    }
+
+    if (scrollType == GTK_SCROLL_STEP_DOWN ||
+        scrollType == GTK_SCROLL_PAGE_DOWN ||
+        scrollType == GTK_SCROLL_END) {
+        focus_first_result_row();
+    }
+}
+
+static void on_settings_combo_move_active(GtkComboBox* combo, GtkScrollType scrollType, gpointer data) {
+    g_signal_stop_emission_by_name(combo, "move-active");
+
+    GtkWidget* dialog = gtk_widget_get_toplevel(GTK_WIDGET(combo));
+    if (!dialog) {
+        return;
+    }
+
+    if (scrollType == GTK_SCROLL_STEP_UP ||
+        scrollType == GTK_SCROLL_PAGE_UP ||
+        scrollType == GTK_SCROLL_START) {
+        gtk_widget_child_focus(dialog, GTK_DIR_UP);
+        return;
+    }
+
+    if (scrollType == GTK_SCROLL_STEP_DOWN ||
+        scrollType == GTK_SCROLL_PAGE_DOWN ||
+        scrollType == GTK_SCROLL_END) {
+        gtk_widget_child_focus(dialog, GTK_DIR_DOWN);
+    }
 }
 
 static void on_sort_combo_changed(GtkComboBox* combo, gpointer data) {
@@ -518,7 +626,6 @@ static void on_sort_combo_changed(GtkComboBox* combo, gpointer data) {
 
     g_ctx->sortMode = static_cast<SortMode>(active);
     rebuild_result_list();
-    focus_first_result_row();
 }
 
 static void start_analysis_for_directory(const std::string& dirpath) {
@@ -697,6 +804,7 @@ static void on_settings_clicked(GtkWidget* widget, gpointer data) {
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(theme_combo), "Light");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(theme_combo), "Dark");
     gtk_combo_box_set_active(GTK_COMBO_BOX(theme_combo), g_ctx->settings.themeMode);
+    g_signal_connect(theme_combo, "move-active", G_CALLBACK(on_settings_combo_move_active), NULL);
     
     gtk_grid_attach(GTK_GRID(grid), theme_label, 0, 0, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), theme_combo, 1, 0, 1, 1);
@@ -719,6 +827,7 @@ static void on_settings_clicked(GtkWidget* widget, gpointer data) {
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(raw_combo), "Full size");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(raw_combo), "Preview");
     gtk_combo_box_set_active(GTK_COMBO_BOX(raw_combo), g_ctx->settings.rawMode);
+    g_signal_connect(raw_combo, "move-active", G_CALLBACK(on_settings_combo_move_active), NULL);
     
     // Adjusted coordinates: moved RAW combo to row 3 to prevent overlap
     gtk_grid_attach(GTK_GRID(grid), raw_label, 0, 3, 1, 1);
@@ -759,6 +868,7 @@ static void run_gtk_thread() {
         G_CALLBACK(on_window_destroy),
         G_CALLBACK(on_button_clicked),
         G_CALLBACK(on_select_button_key_press),
+        G_CALLBACK(on_results_control_key_press),
         G_CALLBACK(on_recheck_button_clicked),
         G_CALLBACK(on_sort_combo_changed),
         G_CALLBACK(on_delete_blurry_clicked),
@@ -771,6 +881,9 @@ static void run_gtk_thread() {
         G_CALLBACK(on_flow_box_child_activated),
         G_CALLBACK(on_list_scroll_event)
     });
+
+    g_signal_connect(g_ctx->sort_combo, "move-active", G_CALLBACK(on_results_combo_move_active), NULL);
+    g_signal_connect(g_ctx->view_mode_combo, "move-active", G_CALLBACK(on_results_combo_move_active), NULL);
 
     gtk_widget_show_all(g_ctx->window);
     gtk_main();
