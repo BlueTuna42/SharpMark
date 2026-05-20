@@ -1,0 +1,10 @@
+#pragma once
+#include "../pipeline/interfaces.h"
+#include "../img_tools/bmp.h"
+
+class DefaultImageLoader : public IImageLoader {
+public:
+    std::unique_ptr<GrayscaleImage> load(const ProcessingContext& ctx) override {
+        return ImageIO::readImage(ctx.filePath.string(), ctx.settings.rawMode);
+    }
+};
