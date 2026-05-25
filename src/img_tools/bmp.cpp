@@ -1,14 +1,11 @@
 #include "bmp.h"
-#include <iostream>
-#include <cstring>
+#include <memory>
+#include <string>
 #include <future>
 #include <filesystem>
 
 #ifdef _WIN32
 #include <windows.h>
-#endif
-
-#ifdef _WIN32
 #define strcasecmp _stricmp
 #else
 #include <strings.h>
@@ -21,9 +18,8 @@
 std::unique_ptr<GrayscaleImage> ImageIO::readImage(const std::string& filename, bool halfSize) {
     size_t extPos = filename.find_last_of('.');
     std::string ext = (extPos == std::string::npos) ? "" : filename.substr(extPos);
-    
+
 #ifdef _WIN32
-    // Convert path to UTF-8
     std::filesystem::path fs_path = std::filesystem::u8path(filename);
     std::wstring w_filename = fs_path.wstring();
 #endif
@@ -34,19 +30,34 @@ std::unique_ptr<GrayscaleImage> ImageIO::readImage(const std::string& filename, 
 
     if (isRaw) {
         libraw_data_t *lr = libraw_init(0);
+        if (!lr) return nullptr;
 
-        if (libraw_open_file(lr, filename.c_str()) != LIBRAW_SUCCESS) return nullptr;
+        int openResult = LIBRAW_SUCCESS;
+#ifdef _WIN32
+        openResult = libraw_open_wfile(lr, w_filename.c_str());
+#else
+        openResult = libraw_open_file(lr, filename.c_str());
+#endif
+
+        if (openResult != LIBRAW_SUCCESS) {
+            libraw_close(lr);
+            return nullptr;
+        }
 
         // half size optimization
         if (halfSize) {
-             lr->params.half_size = 1;
+            lr->params.half_size = 1;
         }
 
         libraw_unpack(lr);
         libraw_dcraw_process(lr);
         int err = 0;
         libraw_processed_image_t *img = libraw_dcraw_make_mem_image(lr, &err);
-        if (!img) { libraw_close(lr); return nullptr; }
+        
+        if (!img) { 
+            libraw_close(lr); 
+            return nullptr; 
+        }
 
         auto grayImg = std::make_unique<GrayscaleImage>(img->width, img->height);
         int total = img->width * img->height;
@@ -81,7 +92,7 @@ std::unique_ptr<GrayscaleImage> ImageIO::readImage(const std::string& filename, 
         data = stbi_load(filename.c_str(), &w, &h, &c, 3);
 #endif
         if (!data) return nullptr;
-        
+
         auto grayImg = std::make_unique<GrayscaleImage>(w, h);
         int total = w * h;
 
