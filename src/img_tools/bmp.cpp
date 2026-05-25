@@ -15,7 +15,7 @@
 #include "../Lib/stb_image.h"
 #include <libraw/libraw.h>
 
-std::unique_ptr<GrayscaleImage> ImageIO::readImage(const std::string& filename, bool halfSize) {
+std::unique_ptr<GrayscaleImage> ImageIO::readImage(const std::string& filename, int rawMode) {
     size_t extPos = filename.find_last_of('.');
     std::string ext = (extPos == std::string::npos) ? "" : filename.substr(extPos);
 
@@ -44,15 +44,27 @@ std::unique_ptr<GrayscaleImage> ImageIO::readImage(const std::string& filename, 
             return nullptr;
         }
 
-        // half size optimization
-        if (halfSize) {
-            lr->params.half_size = 1;
-        }
+        libraw_processed_image_t *img = nullptr;
+    int err = 0;
 
+    if (rawMode == 0) {
+        if (libraw_unpack_thumb(lr) == LIBRAW_SUCCESS) {
+            img = libraw_dcraw_make_mem_thumb(lr, &err);
+    
+            if (img && img->type == LIBRAW_IMAGE_JPEG) {
+                libraw_dcraw_clear_mem(img);
+                img = nullptr; 
+            }
+        }
+    }
+
+    if (!img) {
+        lr->params.half_size = (rawMode == 2) ? 0 : 1; 
+        
         libraw_unpack(lr);
         libraw_dcraw_process(lr);
-        int err = 0;
-        libraw_processed_image_t *img = libraw_dcraw_make_mem_image(lr, &err);
+        img = libraw_dcraw_make_mem_image(lr, &err);
+    }
         
         if (!img) { 
             libraw_close(lr); 

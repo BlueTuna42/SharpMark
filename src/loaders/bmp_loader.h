@@ -5,6 +5,6 @@
 class DefaultImageLoader : public IImageLoader {
 public:
     std::unique_ptr<GrayscaleImage> load(const ProcessingContext& ctx) override {
-        return ImageIO::readImage(ctx.filePath.string(), ctx.settings.rawMode);
+        return ImageIO::readImage(ctx.filePath.string(), ctx.settings.rawAnalysisMode);
     }
 };

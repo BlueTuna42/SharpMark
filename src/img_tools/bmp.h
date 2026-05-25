@@ -7,7 +7,7 @@
 
 class ImageIO {
 public:
-    static std::unique_ptr<GrayscaleImage> readImage(const std::string& filename, bool halfSize = false);
+    static std::unique_ptr<GrayscaleImage> readImage(const std::string& filename, int rawMode = 0);
 };
 
 #endif

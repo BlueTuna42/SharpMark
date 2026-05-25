@@ -289,7 +289,7 @@ static void select_visible_result_row(int index) {
 }
 
 static void open_viewer_for_result(const ResultData& result) {
-    open_image_viewer(GTK_WINDOW(g_ctx->window), result, g_ctx->settings.rawMode, {
+    open_image_viewer(GTK_WINDOW(g_ctx->window), result, g_ctx->settings.rawViewMode, {
         [](const std::string& filename) {
             return g_ctx->results.visibleIndexForFilename(g_ctx->sortMode, filename);
         },
@@ -836,19 +836,31 @@ static void on_settings_clicked(GtkWidget* widget, gpointer data) {
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(cache_check), g_ctx->settings.cacheLaplacian);
     gtk_grid_attach(GTK_GRID(grid), cache_check, 0, 2, 2, 1); 
 
-    // RAW open mode
-    GtkWidget *raw_label = gtk_label_new("Open RAW images:");
-    gtk_widget_set_halign(raw_label, GTK_ALIGN_START);
-    GtkWidget *raw_combo = gtk_combo_box_text_new();
-    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(raw_combo), "Half size");
-    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(raw_combo), "Full size");
-    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(raw_combo), "Preview");
-    gtk_combo_box_set_active(GTK_COMBO_BOX(raw_combo), g_ctx->settings.rawMode);
-    g_signal_connect(raw_combo, "move-active", G_CALLBACK(on_settings_combo_move_active), NULL);
+    // RAW View Quality mode
+    GtkWidget *raw_view_label = gtk_label_new("RAW View Quality:");
+    gtk_widget_set_halign(raw_view_label, GTK_ALIGN_START);
+    GtkWidget *raw_view_combo = gtk_combo_box_text_new();
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(raw_view_combo), "Thumbnail (Fastest)");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(raw_view_combo), "Half size");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(raw_view_combo), "Full size");
+    gtk_combo_box_set_active(GTK_COMBO_BOX(raw_view_combo), g_ctx->settings.rawViewMode);
+    g_signal_connect(raw_view_combo, "move-active", G_CALLBACK(on_settings_combo_move_active), NULL);
     
-    // Adjusted coordinates: moved RAW combo to row 3 to prevent overlap
-    gtk_grid_attach(GTK_GRID(grid), raw_label, 0, 3, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), raw_combo, 1, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), raw_view_label, 0, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), raw_view_combo, 1, 3, 1, 1);
+
+    // RAW Analysis Quality mode
+    GtkWidget *raw_analysis_label = gtk_label_new("RAW Analysis Quality:");
+    gtk_widget_set_halign(raw_analysis_label, GTK_ALIGN_START);
+    GtkWidget *raw_analysis_combo = gtk_combo_box_text_new();
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(raw_analysis_combo), "Thumbnail (Fastest)");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(raw_analysis_combo), "Half size");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(raw_analysis_combo), "Full size");
+    gtk_combo_box_set_active(GTK_COMBO_BOX(raw_analysis_combo), g_ctx->settings.rawAnalysisMode);
+    g_signal_connect(raw_analysis_combo, "move-active", G_CALLBACK(on_settings_combo_move_active), NULL);
+    
+    gtk_grid_attach(GTK_GRID(grid), raw_analysis_label, 0, 4, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), raw_analysis_combo, 1, 4, 1, 1);
     
     gtk_widget_show_all(dialog);
     
@@ -856,14 +868,16 @@ static void on_settings_clicked(GtkWidget* widget, gpointer data) {
         int newThemeMode = gtk_combo_box_get_active(GTK_COMBO_BOX(theme_combo));
         bool newWriteExif = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(exif_check));
         bool newCacheLaplacian = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(cache_check)); // Read checkbox state
-        int newRawMode = gtk_combo_box_get_active(GTK_COMBO_BOX(raw_combo));
+        int newRawViewMode = gtk_combo_box_get_active(GTK_COMBO_BOX(raw_view_combo));
+        int newRawAnalysisMode = gtk_combo_box_get_active(GTK_COMBO_BOX(raw_analysis_combo));
 
         {
             std::lock_guard<std::mutex> lock(g_ctx->mtx);
             g_ctx->settings.themeMode = newThemeMode;
             g_ctx->settings.writeExif = newWriteExif;
             g_ctx->settings.cacheLaplacian = newCacheLaplacian;
-            g_ctx->settings.rawMode = newRawMode;
+            g_ctx->settings.rawViewMode = newRawViewMode;
+            g_ctx->settings.rawAnalysisMode = newRawAnalysisMode;
         }
 
         apply_theme(newThemeMode);
