@@ -18,6 +18,15 @@
 #include <string>
 #include <filesystem>
 
+#ifdef _WIN32
+#include <fstream>
+#include <windows.h>
+#undef SetCurrentDirectory
+#else
+#include <pwd.h>
+#include <unistd.h>
+#endif
+
 struct DirectoryData {
     std::string dirpath;
 };
@@ -798,6 +807,67 @@ static void apply_theme(int themeMode) {
 
 // Settings action
 
+static std::filesystem::path get_settings_file_path() {
+#ifdef _WIN32
+    // Portable Windows mode: save next to the executable
+    wchar_t buffer[MAX_PATH];
+    GetModuleFileNameW(NULL, buffer, MAX_PATH);
+    std::filesystem::path exePath(buffer);
+    return exePath.parent_path() / "settings.conf";
+#else
+    // Linux/macOS mode: save in user's config directory
+    std::filesystem::path configDir;
+    const char *homeDir = getenv("HOME");
+    if (!homeDir) {
+        struct passwd *pwd = getpwuid(getuid());
+        if (pwd) homeDir = pwd->pw_dir;
+    }
+    if (homeDir) {
+        configDir = std::filesystem::path(homeDir) / ".config" / "SharpMark";
+    } else {
+        configDir = std::filesystem::current_path() / ".sharpmark";
+    }
+
+    if (!std::filesystem::exists(configDir)) {
+        std::error_code ec;
+        std::filesystem::create_directories(configDir, ec);
+    }
+    return configDir / "settings.conf";
+#endif
+}
+
+static void load_settings(AppSettings& settings) {
+    std::ifstream in(get_settings_file_path());
+    if (!in.is_open()) return;
+
+    std::string line;
+    while (std::getline(in, line)) {
+        std::istringstream iss(line);
+        std::string key;
+        if (std::getline(iss, key, '=')) {
+            std::string value;
+            if (std::getline(iss, value)) {
+                if (key == "themeMode") settings.themeMode = std::stoi(value);
+                else if (key == "writeExif") settings.writeExif = (value == "1");
+                else if (key == "cacheLaplacian") settings.cacheLaplacian = (value == "1");
+                else if (key == "rawAnalysisMode") settings.rawAnalysisMode = std::stoi(value);
+                else if (key == "rawViewMode") settings.rawViewMode = std::stoi(value);
+            }
+        }
+    }
+}
+
+static void save_settings(const AppSettings& settings) {
+    std::ofstream out(get_settings_file_path());
+    if (!out.is_open()) return;
+
+    out << "themeMode=" << settings.themeMode << "\n";
+    out << "writeExif=" << (settings.writeExif ? 1 : 0) << "\n";
+    out << "cacheLaplacian=" << (settings.cacheLaplacian ? 1 : 0) << "\n";
+    out << "rawAnalysisMode=" << settings.rawAnalysisMode << "\n";
+    out << "rawViewMode=" << settings.rawViewMode << "\n";
+}
+
 static void on_settings_clicked(GtkWidget* widget, gpointer data) {
     GtkWidget *dialog = gtk_dialog_new_with_buttons("Settings",
         GTK_WINDOW(g_ctx->window),
@@ -878,6 +948,8 @@ static void on_settings_clicked(GtkWidget* widget, gpointer data) {
             g_ctx->settings.cacheLaplacian = newCacheLaplacian;
             g_ctx->settings.rawViewMode = newRawViewMode;
             g_ctx->settings.rawAnalysisMode = newRawAnalysisMode;
+
+            save_settings(g_ctx->settings);
         }
 
         apply_theme(newThemeMode);
@@ -925,6 +997,7 @@ static void run_gtk_thread() {
 
 VisualGUI::VisualGUI() {
     g_ctx = new GUIContext();
+    load_settings(g_ctx->settings);
     g_ctx->gtkThread = std::thread(run_gtk_thread);
 }
 
@@ -932,6 +1005,7 @@ VisualGUI::~VisualGUI() {
     if (g_ctx && g_ctx->gtkThread.joinable()) {
         g_ctx->gtkThread.join();
     }
+    save_settings(g_ctx->settings);
     g_ctx->results.clear();
     delete g_ctx;
 }
