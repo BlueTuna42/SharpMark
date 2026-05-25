@@ -16,6 +16,8 @@
 #include "processors/laplacian_focus.h"
 #include "postprocessors/xmp_rating.h"
 
+#include "processors/draw_square.h"
+
 class FocusCheckerApp {
 private:
     std::mutex output_mutex;
@@ -44,7 +46,6 @@ public:
         gui.SetCurrentDirectory(dirpath);
         gui.ResetProgress(totalFiles);
         
-        // Fetch settings once before starting threads to avoid UI thread issues
         AppSettings settings = gui.GetSettings();
 
         #ifdef _WIN32
@@ -66,8 +67,6 @@ public:
         // Launch worker threads
         for (unsigned int i = 0; i < threadsToUse; ++i) {
             workers.emplace_back([this, &files, &log, &gui, settings, &processedFiles, &sharpFiles, &blurryFiles, totalFiles, &fileIndex]() {
-                
-                // Each thread gets its own isolated pipeline instance
                 PipelineRunner runner = createPipeline();
                 
                 while (true) {
@@ -78,7 +77,6 @@ public:
 
                     const std::string& file = files[idx];
                     
-                    // Setup execution context for the current file
                     ProcessingContext ctx;
                     ctx.filePath = file;
                     ctx.settings = settings;
@@ -89,28 +87,22 @@ public:
                     std::filesystem::path origPath(file);
                     #endif
                     ctx.cacheDir = origPath.parent_path() / ".laplacian_cache";
-
-                    // Run the modular pipeline
+                    
                     ProcessingResult result = runner.run(ctx);
 
-                    // Handle results if processing was successful
                     if (result.success) {
                         if (result.isBlurry) {
                             ++blurryFiles;
                         } else {
                             ++sharpFiles;
                         }
-
-                        // Send result back to the GUI
                         gui.AddResult(file, result.isBlurry);
 
-                        // Safely write to log
                         std::lock_guard<std::mutex> lock(output_mutex);
                         if (result.isBlurry) {
                             log << file << std::endl;
                         }
                     } else {
-                        // Optional: Handle or log failure (result.warnings)
                         std::lock_guard<std::mutex> lock(output_mutex);
                         std::cerr << "Failed to process " << file << std::endl;
                     }
