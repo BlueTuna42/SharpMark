@@ -5,6 +5,8 @@
 #include <cmath>
 #include <libraw/libraw.h>
 #include <strings.h>
+#include <locale>
+#include <codecvt>
 
 static void free_pixbuf_pixels(guchar* pixels, gpointer data) {
     g_free(pixels);
@@ -90,20 +92,50 @@ static GdkPixbuf* load_raw_preview_pixbuf(const std::string& filename, int maxWi
         return nullptr;
     }
 
-    lr->params.half_size = 1;
-    lr->params.output_bps = 8;
-
     GdkPixbuf* pixbuf = nullptr;
-    if (libraw_open_file(lr, filename.c_str()) == LIBRAW_SUCCESS &&
-        libraw_unpack(lr) == LIBRAW_SUCCESS &&
-        libraw_dcraw_process(lr) == LIBRAW_SUCCESS) {
-        int err = 0;
-        libraw_processed_image_t *image = libraw_dcraw_make_mem_image(lr, &err);
-        if (image && image->type == LIBRAW_IMAGE_BITMAP) {
-            pixbuf = create_pixbuf_from_rgb_data(*image, maxWidth, maxHeight);
+    int open_result = 0;
+
+#ifdef _WIN32
+    std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+    std::wstring wfilename = converter.from_bytes(filename);
+    open_result = libraw_open_wfile(lr, wfilename.c_str());
+#else
+    open_result = libraw_open_file(lr, filename.c_str());
+#endif
+
+    if (open_result == LIBRAW_SUCCESS) {
+        // FAST PATH: Try to extract embedded thumbnail
+        if (libraw_unpack_thumb(lr) == LIBRAW_SUCCESS) {
+            libraw_processed_image_t *thumb_image = libraw_dcraw_make_mem_thumb(lr, nullptr);
+            if (thumb_image) {
+                if (thumb_image->type == LIBRAW_IMAGE_JPEG) {
+                    GInputStream* stream = g_memory_input_stream_new_from_data(thumb_image->data, thumb_image->data_size, nullptr);
+                    if (stream) {
+                        pixbuf = gdk_pixbuf_new_from_stream_at_scale(stream, maxWidth, maxHeight, TRUE, nullptr, nullptr);
+                        g_object_unref(stream);
+                    }
+                } else if (thumb_image->type == LIBRAW_IMAGE_BITMAP) {
+                    pixbuf = create_pixbuf_from_rgb_data(*thumb_image, maxWidth, maxHeight);
+                }
+                libraw_dcraw_clear_mem(thumb_image);
+            }
         }
-        if (image) {
-            libraw_dcraw_clear_mem(image);
+        
+        // SLOW PATH: Fallback to partial or full decoding if no thumb exists
+        if (!pixbuf) {
+            lr->params.half_size = 1;
+            lr->params.output_bps = 8;
+            if (libraw_unpack(lr) == LIBRAW_SUCCESS &&
+                libraw_dcraw_process(lr) == LIBRAW_SUCCESS) {
+                int err = 0;
+                libraw_processed_image_t *image = libraw_dcraw_make_mem_image(lr, &err);
+                if (image && image->type == LIBRAW_IMAGE_BITMAP) {
+                    pixbuf = create_pixbuf_from_rgb_data(*image, maxWidth, maxHeight);
+                }
+                if (image) {
+                    libraw_dcraw_clear_mem(image);
+                }
+            }
         }
     }
 
