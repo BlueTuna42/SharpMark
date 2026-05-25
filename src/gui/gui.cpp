@@ -95,7 +95,7 @@ static void set_scan_controls_busy(bool showProgressBar) {
     }
     gtk_button_set_label(GTK_BUTTON(g_ctx->button_select), "Analysis in progress...");
     if (g_ctx->list_scrolled_window) {
-        gtk_widget_set_sensitive(g_ctx->list_scrolled_window, FALSE);
+        gtk_widget_set_sensitive(g_ctx->list_scrolled_window, TRUE);
     }
     if (showProgressBar && g_ctx->progress_bar) {
         gtk_widget_show(g_ctx->progress_bar);
@@ -321,10 +321,6 @@ static void open_result_row(GtkListBoxRow* row) {
 
     const char* filename = static_cast<const char*>(g_object_get_data(G_OBJECT(row), "filename"));
     if (!filename) {
-        return;
-    }
-
-    if (g_ctx->scanInProgress) {
         return;
     }
 
@@ -693,7 +689,7 @@ static void on_view_mode_combo_changed(GtkComboBox* combo, gpointer data) {
 }
 
 static void on_flow_box_child_activated(GtkFlowBox* box, GtkFlowBoxChild* child, gpointer data) {
-    if (!child || g_ctx->scanInProgress) return;
+    if (!child) return;
     
     const char* filename = static_cast<const char*>(g_object_get_data(G_OBJECT(child), "filename"));
     if (!filename) return;

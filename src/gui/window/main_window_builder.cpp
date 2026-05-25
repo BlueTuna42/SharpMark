@@ -141,25 +141,33 @@ static void update_selection_css(GtkSettings *settings, GParamSpec *pspec, gpoin
     }
 
     const char* css = is_dark ?
-        "#results-flow-box flowboxchild:selected:not(:focus) {\n"
-        "  background-color: transparent;\n"
+        "#results-flow-box flowboxchild:selected,\n"
+        "#results-list-box row:selected {\n"
+        "  background-image: none;\n"
+        "  background-color: rgba(255, 255, 255, 0.15);\n"
         "  color: inherit;\n"
+        "  text-shadow: none;\n"
+        "  border-radius: 6px;\n"
         "}\n"
         "#results-flow-box flowboxchild:selected:focus,\n"
         "#results-list-box row:selected:focus {\n"
+        "  background-image: none;\n"
         "  background-color: #f4f4f4;\n"
         "  color: #000000;\n"
-        "  border-radius: 6px;\n"
         "}\n" :
-        "#results-flow-box flowboxchild:selected:not(:focus) {\n"
-        "  background-color: transparent;\n"
+        "#results-flow-box flowboxchild:selected,\n"
+        "#results-list-box row:selected {\n"
+        "  background-image: none;\n"
+        "  background-color: rgba(0, 0, 0, 0.15);\n"
         "  color: inherit;\n"
+        "  text-shadow: none;\n"
+        "  border-radius: 6px;\n"
         "}\n"
         "#results-flow-box flowboxchild:selected:focus,\n"
         "#results-list-box row:selected:focus {\n"
+        "  background-image: none;\n"
         "  background-color: #d0d0d0;\n"
         "  color: #000000;\n"
-        "  border-radius: 6px;\n"
         "}\n";
         
     gtk_css_provider_load_from_data(provider, css, -1, NULL);
