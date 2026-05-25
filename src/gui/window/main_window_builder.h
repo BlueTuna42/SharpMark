@@ -21,6 +21,7 @@ struct MainWindowCallbacks {
     GCallback viewModeChanged = nullptr;
     GCallback flowBoxChildActivated = nullptr;
     GCallback listScrollEvent = nullptr;
+    GCallback pauseClicked = nullptr;
 };
 
 void build_main_window(GUIContext& ctx, const MainWindowCallbacks& callbacks);

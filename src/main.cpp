@@ -86,6 +86,11 @@ public:
                     PipelineRunner runner = createPipeline();
                     
                     while (!cancel_requested && !gui.IsClosed()) {
+                        if (gui.IsPaused()) {
+                            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                            continue;
+                        }
+                        
                         size_t idx = fileIndex.fetch_add(1, std::memory_order_relaxed);
                         if (idx >= files.size()) break;
 

@@ -9,6 +9,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <atomic>
 
 enum class ViewMode {
     List = 0,
@@ -29,6 +30,7 @@ struct GUIContext {
     GtkWidget *sort_combo = nullptr;
     GtkWidget *button_delete_blurry = nullptr;
     GtkWidget *button_clear_cache = nullptr; 
+    GtkWidget *button_pause = nullptr;
     GtkWidget *progress_bar = nullptr;
     GtkWidget *summary_box = nullptr;
     GtkWidget *summary_sharp_label = nullptr;
@@ -52,6 +54,7 @@ struct GUIContext {
     bool dirSelected = false;
     bool windowClosed = false;
     bool scanInProgress = false;
+    std::atomic<bool> isPaused{false};
 
     std::thread gtkThread;
 };

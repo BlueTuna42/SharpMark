@@ -22,6 +22,9 @@ public:
     void UpdateProgress(int processedFiles, int totalFiles);
     void ShowFinished(int sharpFiles, int blurryFiles);
     bool IsClosed() const;
+    void TogglePause();
+    bool IsPaused() const;
+    std::string GetCurrentDir() const;
     
     AppSettings GetSettings() const;
 };

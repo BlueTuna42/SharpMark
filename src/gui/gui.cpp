@@ -74,6 +74,7 @@ static void update_delete_blurry_button_state() {
 
 static void set_scan_controls_busy(bool showProgressBar) {
     g_ctx->scanInProgress = true;
+    g_ctx->isPaused = false; 
     result_list_view_set_empty_visible(current_result_list_view(), false);
 
     if (g_ctx->directory_box) {
@@ -89,6 +90,12 @@ static void set_scan_controls_busy(bool showProgressBar) {
     }
     if (showProgressBar && g_ctx->progress_bar) {
         gtk_widget_show(g_ctx->progress_bar);
+    }
+    if (g_ctx->button_pause) {
+        GtkWidget* image = gtk_image_new_from_icon_name("media-playback-pause-symbolic", GTK_ICON_SIZE_BUTTON);
+        gtk_button_set_image(GTK_BUTTON(g_ctx->button_pause), image);
+        gtk_widget_set_tooltip_text(g_ctx->button_pause, "Pause scan");
+        gtk_widget_show(g_ctx->button_pause);
     }
 }
 
@@ -118,6 +125,9 @@ static void set_scan_controls_ready() {
     }
     if (g_ctx->progress_bar) {
         gtk_widget_hide(g_ctx->progress_bar);
+    }
+    if (g_ctx->button_pause) {
+        gtk_widget_hide(g_ctx->button_pause);
     }
     update_delete_blurry_button_state();
 }
@@ -686,6 +696,13 @@ static void on_flow_box_child_activated(GtkFlowBox* box, GtkFlowBoxChild* child,
     }
 }
 
+// pause button
+
+static void on_pause_clicked(GtkWidget* widget, gpointer data) {
+    VisualGUI* gui = static_cast<VisualGUI*>(data);
+    gui->TogglePause();
+}
+
 static gboolean on_list_scroll_event(GtkWidget* widget, GdkEventScroll* event, gpointer data) {
     if (event->state & GDK_CONTROL_MASK) {
         double delta = 0.0;
@@ -879,7 +896,8 @@ static void run_gtk_thread() {
         G_CALLBACK(on_settings_clicked),
         G_CALLBACK(on_view_mode_combo_changed),
         G_CALLBACK(on_flow_box_child_activated),
-        G_CALLBACK(on_list_scroll_event)
+        G_CALLBACK(on_list_scroll_event),
+        G_CALLBACK(on_pause_clicked)
     });
 
     g_signal_connect(g_ctx->sort_combo, "move-active", G_CALLBACK(on_results_combo_move_active), NULL);
@@ -957,4 +975,32 @@ AppSettings VisualGUI::GetSettings() const {
     if (!g_ctx) return AppSettings();
     std::lock_guard<std::mutex> lock(g_ctx->mtx);
     return g_ctx->settings;
+}
+
+void VisualGUI::TogglePause() {
+    if (!g_ctx) return;
+    
+    g_ctx->isPaused = !g_ctx->isPaused;
+    
+    g_idle_add([](gpointer) -> gboolean {
+        if (g_ctx && g_ctx->button_pause) {
+            GtkWidget* image = gtk_image_new_from_icon_name(
+                g_ctx->isPaused ? "media-playback-start-symbolic" : "media-playback-pause-symbolic",
+                GTK_ICON_SIZE_BUTTON
+            );
+            gtk_button_set_image(GTK_BUTTON(g_ctx->button_pause), image);
+            gtk_widget_set_tooltip_text(g_ctx->button_pause, g_ctx->isPaused ? "Resume scan" : "Pause scan");
+        }
+        return G_SOURCE_REMOVE;
+    }, nullptr);
+}
+
+bool VisualGUI::IsPaused() const {
+    if (!g_ctx) return false;
+    return g_ctx->isPaused.load();
+}
+
+std::string VisualGUI::GetCurrentDir() const {
+    std::lock_guard<std::mutex> lock(g_ctx->mtx);
+    return g_ctx->currentDir;
 }

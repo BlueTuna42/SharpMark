@@ -42,6 +42,12 @@ static void build_top_bar(GUIContext& ctx, GtkWidget* vbox, const MainWindowCall
     gtk_box_pack_start(GTK_BOX(ctx.top_button_box), ctx.button_recheck, FALSE, FALSE, 0);
     gtk_widget_hide(ctx.button_recheck);
 
+    ctx.button_pause = gtk_button_new_from_icon_name("media-playback-pause-symbolic", GTK_ICON_SIZE_BUTTON);
+    gtk_widget_set_tooltip_text(ctx.button_pause, "Pause scan");
+    gtk_widget_set_no_show_all(ctx.button_pause, TRUE);
+    g_signal_connect(ctx.button_pause, "clicked", callbacks.pauseClicked, nullptr);
+    gtk_box_pack_start(GTK_BOX(ctx.top_button_box), ctx.button_pause, FALSE, FALSE, 0);
+
     ctx.button_settings = gtk_button_new_from_icon_name("preferences-system-symbolic", GTK_ICON_SIZE_BUTTON);
     gtk_widget_set_tooltip_text(ctx.button_settings, "Settings");
     g_signal_connect(ctx.button_settings, "clicked", callbacks.settingsClicked, NULL);
