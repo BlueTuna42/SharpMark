@@ -112,6 +112,8 @@ struct ImageContext {
     // Window states
     bool initial_fit_done = false;
     bool is_fullscreen = false;
+
+    int rawMode = 0;
 };
 
 static void update_viewer_navigation_state(ImageContext* ctx);
@@ -358,7 +360,7 @@ static void load_current_image(ImageContext* ctx) {
 
     // Default to the original image preview
     if (!ctx->show_laplacian) {
-        ctx->original_pixbuf = load_preview_pixbuf(ctx->filename, 8192, 8192);
+        ctx->original_pixbuf = load_preview_pixbuf(ctx->filename, 8192, 8192, ctx->rawMode); 
     }
 
     if (ctx->original_pixbuf) {
@@ -475,10 +477,11 @@ static void update_viewer_navigation_state(ImageContext* ctx) {
     gtk_widget_set_sensitive(ctx->next_button, hasNext);
 }
 
-void open_image_viewer(GtkWindow* parent, const ResultData& result, ImageViewerCallbacks callbacks) {
+void open_image_viewer(GtkWindow* parent, const ResultData& result, int rawMode, const ImageViewerCallbacks& callbacks) {
     ImageContext* ctx = new ImageContext();
     ctx->filename = result.filename;
     ctx->isBlurry = result.isBlurry;
+    ctx->rawMode = rawMode;
     ctx->callbacks = callbacks;
 
     ctx->viewer_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);

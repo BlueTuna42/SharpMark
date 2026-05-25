@@ -289,7 +289,7 @@ static void select_visible_result_row(int index) {
 }
 
 static void open_viewer_for_result(const ResultData& result) {
-    open_image_viewer(GTK_WINDOW(g_ctx->window), result, {
+    open_image_viewer(GTK_WINDOW(g_ctx->window), result, g_ctx->settings.rawMode, {
         [](const std::string& filename) {
             return g_ctx->results.visibleIndexForFilename(g_ctx->sortMode, filename);
         },

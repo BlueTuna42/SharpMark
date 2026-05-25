@@ -86,11 +86,9 @@ static GdkPixbuf* create_pixbuf_from_rgb_data(const libraw_processed_image_t& im
     return scale_pixbuf_to_fit(pixbuf, maxWidth, maxHeight);
 }
 
-static GdkPixbuf* load_raw_preview_pixbuf(const std::string& filename, int maxWidth, int maxHeight) {
+static GdkPixbuf* load_raw_preview_pixbuf(const std::string& filename, int maxWidth, int maxHeight, int rawMode) {
     libraw_data_t *lr = libraw_init(0);
-    if (!lr) {
-        return nullptr;
-    }
+    if (!lr) return nullptr;
 
     GdkPixbuf* pixbuf = nullptr;
     int open_result = 0;
@@ -103,27 +101,28 @@ static GdkPixbuf* load_raw_preview_pixbuf(const std::string& filename, int maxWi
     open_result = libraw_open_file(lr, filename.c_str());
 #endif
 
-    if (open_result == LIBRAW_SUCCESS) {
-        // FAST PATH: Try to extract embedded thumbnail
-        if (libraw_unpack_thumb(lr) == LIBRAW_SUCCESS) {
-            libraw_processed_image_t *thumb_image = libraw_dcraw_make_mem_thumb(lr, nullptr);
-            if (thumb_image) {
-                if (thumb_image->type == LIBRAW_IMAGE_JPEG) {
-                    GInputStream* stream = g_memory_input_stream_new_from_data(thumb_image->data, thumb_image->data_size, nullptr);
-                    if (stream) {
-                        pixbuf = gdk_pixbuf_new_from_stream_at_scale(stream, maxWidth, maxHeight, TRUE, nullptr, nullptr);
-                        g_object_unref(stream);
+        if (open_result == LIBRAW_SUCCESS) {
+        if (rawMode == 0) {
+            if (libraw_unpack_thumb(lr) == LIBRAW_SUCCESS) {
+                libraw_processed_image_t *thumb = libraw_dcraw_make_mem_thumb(lr, nullptr);
+                if (thumb) {
+                    if (thumb->type == LIBRAW_IMAGE_JPEG) {
+                        GInputStream* stream = g_memory_input_stream_new_from_data(thumb->data, thumb->data_size, nullptr);
+                        if (stream) {
+                            pixbuf = gdk_pixbuf_new_from_stream_at_scale(stream, maxWidth, maxHeight, TRUE, nullptr, nullptr);
+                            g_object_unref(stream);
+                        }
+                    } else if (thumb->type == LIBRAW_IMAGE_BITMAP) {
+                        pixbuf = create_pixbuf_from_rgb_data(*thumb, maxWidth, maxHeight);
                     }
-                } else if (thumb_image->type == LIBRAW_IMAGE_BITMAP) {
-                    pixbuf = create_pixbuf_from_rgb_data(*thumb_image, maxWidth, maxHeight);
+                    libraw_dcraw_clear_mem(thumb);
                 }
-                libraw_dcraw_clear_mem(thumb_image);
             }
         }
-        
-        // SLOW PATH: Fallback to partial or full decoding if no thumb exists
+
         if (!pixbuf) {
-            lr->params.half_size = 1;
+            // mode 1 = half size (1), mode 2 = full size (0)
+            lr->params.half_size = (rawMode == 1) ? 1 : 0; 
             lr->params.output_bps = 8;
             if (libraw_unpack(lr) == LIBRAW_SUCCESS &&
                 libraw_dcraw_process(lr) == LIBRAW_SUCCESS) {
@@ -164,20 +163,22 @@ static GdkPixbuf* create_pixbuf_from_grayscale(const GrayscaleImage& image, int 
         }
     }
 
-    GdkPixbuf* pixbuf = gdk_pixbuf_new_from_data(pixels,
-                                                 GDK_COLORSPACE_RGB,
-                                                 FALSE,
-                                                 8,
-                                                 image.width,
-                                                 image.height,
-                                                 rowstride,
-                                                 free_pixbuf_pixels,
-                                                 NULL);
+    GdkPixbuf* pixbuf = gdk_pixbuf_new_from_data(
+        pixels,
+        GDK_COLORSPACE_RGB,
+        FALSE,
+        8,
+        image.width,
+        image.height,
+        rowstride,
+        free_pixbuf_pixels,
+        NULL
+    );
 
     return scale_pixbuf_to_fit(pixbuf, maxWidth, maxHeight);
 }
 
-GdkPixbuf* load_preview_pixbuf(const std::string& filename, int maxWidth, int maxHeight) {
+GdkPixbuf* load_preview_pixbuf(const std::string& filename, int maxWidth, int maxHeight, int rawMode) {
     GError *error = NULL;
     GdkPixbuf *pixbuf = gdk_pixbuf_new_from_file_at_scale(filename.c_str(), maxWidth, maxHeight, TRUE, &error);
     if (pixbuf) {
@@ -192,7 +193,7 @@ GdkPixbuf* load_preview_pixbuf(const std::string& filename, int maxWidth, int ma
     }
 
     if (is_raw_file(filename)) {
-        pixbuf = load_raw_preview_pixbuf(filename, maxWidth, maxHeight);
+        pixbuf = load_raw_preview_pixbuf(filename, maxWidth, maxHeight, rawMode);
         if (pixbuf) {
             return pixbuf;
         }

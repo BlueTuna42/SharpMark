@@ -14,6 +14,6 @@ struct ImageViewerCallbacks {
     std::function<void(int)> selectVisibleRow;
 };
 
-void open_image_viewer(GtkWindow* parent, const ResultData& result, ImageViewerCallbacks callbacks);
+void open_image_viewer(GtkWindow* parent, const ResultData& result, int rawMode, const ImageViewerCallbacks& callbacks);
 
 #endif
