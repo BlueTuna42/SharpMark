@@ -14,7 +14,9 @@
 #include "pipeline/runner.h"
 #include "loaders/bmp_loader.h"
 #include "processors/laplacian_focus.h"
+#include "processors/state_cache.h"
 #include "postprocessors/xmp_rating.h"
+#include "postprocessors/state_cache.h"
 
 
 class FocusCheckerApp {
@@ -26,8 +28,10 @@ private:
     PipelineRunner createPipeline() {
         PipelineRunner runner;
         runner.setLoader(std::make_unique<DefaultImageLoader>());
+        runner.addProcessor(std::make_unique<StateCacheProcessor>());
         runner.addProcessor(std::make_unique<LaplacianFocusProcessor>());
         runner.addPostProcessor(std::make_unique<XmpRatingPostProcessor>());
+        runner.addPostProcessor(std::make_unique<StateCachePostProcessor>());
         return runner;
     }
 
