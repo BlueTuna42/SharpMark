@@ -4,7 +4,7 @@
 #include <vector>
 #include <memory>
 #include <filesystem>
-#include <optional>
+#include <unordered_map>
 #include "../struct.h"
 #include "../gui/gui.h"
 
@@ -13,18 +13,20 @@ struct AnalysisValue {
     std::variant<int, double, bool, std::string> value;
 };
 
-struct ProcessingResult {
-    bool success = true;
-    bool isBlurry = false;
-    std::string processorName;
-    std::vector<AnalysisValue> metrics;
-    std::vector<std::string> warnings;
-};
-
 struct ProcessingContext {
+    std::string rawFilePath;
     std::filesystem::path filePath;
     AppSettings settings;
     std::filesystem::path cacheDir;
+};
+
+struct ProcessingResult {
+    bool success = true;
+    bool isBlurry = false;
+    std::vector<std::string> processorsRun;
+    std::vector<AnalysisValue> metrics;
+    std::vector<std::string> warnings;
+    std::unordered_map<std::string, std::variant<int, double, bool, std::string>> sharedData;
 };
 
 class IImageProcessor {
@@ -33,13 +35,12 @@ public:
     virtual std::string name() const = 0;
     virtual bool supports(const ProcessingContext& ctx) const = 0;
     
-    // Core processing method
-    virtual ProcessingResult process(const GrayscaleImage& image, const ProcessingContext& ctx) = 0;
-    
-    // Optional fast-path if cached data is available (no image load needed)
-    virtual std::optional<ProcessingResult> tryProcessFromCache(const ProcessingContext& ctx) { 
-        return std::nullopt; 
+    // Returns true if processor successfully loaded its data from cache and doesn't need the image
+    virtual bool tryProcessFromCache(const ProcessingContext& ctx, ProcessingResult& result) { 
+        return false; 
     }
+
+    virtual void process(std::unique_ptr<GrayscaleImage>& image, const ProcessingContext& ctx, ProcessingResult& result) = 0;
 };
 
 class IPostProcessor {
