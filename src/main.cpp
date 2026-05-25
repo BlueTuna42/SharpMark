@@ -8,6 +8,11 @@
 #include <fstream>
 #include <chrono>
 
+#ifdef _WIN32
+#include <windows.h>
+#undef SetCurrentDirectory 
+#endif
+
 #include "tools/scan.h"
 #include "gui/gui.h"
 #include "pipeline/interfaces.h"
@@ -72,7 +77,7 @@ public:
             std::atomic<size_t> fileIndex{0};
 
             const unsigned int numThreads = std::thread::hardware_concurrency();
-            const unsigned int threadsToUse = (numThreads > 0) ? numThreads : 4;
+            const unsigned int threadsToUse = (numThreads > 1) ? numThreads - 1 : 1;
             std::vector<std::thread> workers;
 
             #ifdef _WIN32
@@ -83,6 +88,9 @@ public:
 
             for (unsigned int i = 0; i < threadsToUse; ++i) {
                 workers.emplace_back([&]() {
+                    #ifdef _WIN32
+                        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+                    #endif
                     PipelineRunner runner = createPipeline();
                     
                     while (!cancel_requested && !gui.IsClosed()) {

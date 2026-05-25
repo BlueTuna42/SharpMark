@@ -82,10 +82,7 @@ std::unique_ptr<GrayscaleImage> ImageIO::readImage(const std::string& filename, 
             }
         };
 
-        int mid = total / 2;
-        auto f1 = std::async(std::launch::async, process_chunk, 0, mid);
-        process_chunk(mid, total);
-        f1.wait();
+        process_chunk(0, total);
 
         libraw_dcraw_clear_mem(img);
         libraw_close(lr);
