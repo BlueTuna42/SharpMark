@@ -16,13 +16,13 @@
 #include "processors/laplacian_focus.h"
 #include "postprocessors/xmp_rating.h"
 
-#include "processors/draw_square.h"
 
 class FocusCheckerApp {
 private:
     std::mutex output_mutex;
+    std::thread manager_thread;
+    std::atomic<bool> cancel_requested{false};
 
-    // assemble the processing pipeline
     PipelineRunner createPipeline() {
         PipelineRunner runner;
         runner.setLoader(std::make_unique<DefaultImageLoader>());
@@ -31,99 +31,110 @@ private:
         return runner;
     }
 
+    void stopCurrentTask() {
+        cancel_requested = true;
+        if (manager_thread.joinable()) {
+            manager_thread.join();
+        }
+        cancel_requested = false;
+    }
+
 public:
+    ~FocusCheckerApp() {
+        stopCurrentTask();
+    }
+
     bool processDirectory(const std::string& dirpath, VisualGUI& gui) {
+        stopCurrentTask();
+
         auto files = Scanner::scanFiles(dirpath);
-        std::cout << "Found " << files.size() << " image file(s):" << std::endl;
         const int totalFiles = static_cast<int>(files.size());
 
-        if (totalFiles == 0) return true;
+        if (totalFiles == 0) {
+            gui.ShowFinished(0, 0);
+            gui.SetCurrentDirectory(dirpath);
+            return true;
+        }
 
-        std::atomic<int> processedFiles{0};
-        std::atomic<int> sharpFiles{0};
-        std::atomic<int> blurryFiles{0};
-
-        gui.SetCurrentDirectory(dirpath);
         gui.ResetProgress(totalFiles);
-        
+        gui.SetCurrentDirectory(dirpath);
         AppSettings settings = gui.GetSettings();
 
-        #ifdef _WIN32
-        std::ofstream log("NUL");
-        #else
-        std::ofstream log("/dev/null");
-        #endif
+        // Run the thread pool inside a manager thread to prevent GTK blockage
+        manager_thread = std::thread([this, files, dirpath, &gui, settings, totalFiles]() {
+            std::atomic<int> processedFiles{0};
+            std::atomic<int> sharpFiles{0};
+            std::atomic<int> blurryFiles{0};
+            std::atomic<size_t> fileIndex{0};
 
-        if (!log.is_open()) {
-            std::cerr << "Failed to open dummy log stream." << std::endl;
-        }
+            const unsigned int numThreads = std::thread::hardware_concurrency();
+            const unsigned int threadsToUse = (numThreads > 0) ? numThreads : 4;
+            std::vector<std::thread> workers;
 
-        const unsigned int numThreads = std::thread::hardware_concurrency();
-        const unsigned int threadsToUse = (numThreads > 0) ? numThreads : 4;
+            #ifdef _WIN32
+            std::ofstream log("NUL");
+            #else
+            std::ofstream log("/dev/null");
+            #endif
 
-        std::atomic<size_t> fileIndex{0};
-        std::vector<std::thread> workers;
-
-        // Launch worker threads
-        for (unsigned int i = 0; i < threadsToUse; ++i) {
-            workers.emplace_back([this, &files, &log, &gui, settings, &processedFiles, &sharpFiles, &blurryFiles, totalFiles, &fileIndex]() {
-                PipelineRunner runner = createPipeline();
-                
-                while (true) {
-                    size_t idx = fileIndex.fetch_add(1, std::memory_order_relaxed);
-                    if (idx >= files.size()) {
-                        break;
-                    }
-
-                    const std::string& file = files[idx];
+            for (unsigned int i = 0; i < threadsToUse; ++i) {
+                workers.emplace_back([&]() {
+                    PipelineRunner runner = createPipeline();
                     
-                    ProcessingContext ctx;
-                    ctx.filePath = file;
-                    ctx.settings = settings;
-                    
-                    #ifdef _WIN32
-                    std::filesystem::path origPath = std::filesystem::u8path(file);
-                    #else
-                    std::filesystem::path origPath(file);
-                    #endif
-                    ctx.cacheDir = origPath.parent_path() / ".laplacian_cache";
-                    
-                    ProcessingResult result = runner.run(ctx);
+                    while (!cancel_requested && !gui.IsClosed()) {
+                        size_t idx = fileIndex.fetch_add(1, std::memory_order_relaxed);
+                        if (idx >= files.size()) break;
 
-                    if (result.success) {
-                        if (result.isBlurry) {
-                            ++blurryFiles;
-                        } else {
-                            ++sharpFiles;
+                        const std::string& file = files[idx];
+                        
+                        ProcessingContext ctx;
+                        ctx.rawFilePath = file;
+                        ctx.settings = settings;
+                        #ifdef _WIN32
+                        ctx.filePath = std::filesystem::u8path(file);
+                        #else
+                        ctx.filePath = std::filesystem::path(file);
+                        #endif
+                        ctx.cacheDir = ctx.filePath.parent_path() / ".laplacian_cache";
+
+                        ProcessingResult result = runner.run(ctx);
+
+                        if (result.success) {
+                            if (result.isBlurry) {
+                                ++blurryFiles;
+                            } else {
+                                 ++sharpFiles;
+                            }
+
+                            gui.AddResult(file, result.isBlurry);
+
+                            std::lock_guard<std::mutex> lock(output_mutex);
+                            if (result.isBlurry && log.is_open()) {
+                                log << file << std::endl;
+                            }
                         }
-                        gui.AddResult(file, result.isBlurry);
 
-                        std::lock_guard<std::mutex> lock(output_mutex);
-                        if (result.isBlurry) {
-                            log << file << std::endl;
+                        const int current = ++processedFiles;
+                        if (current % 5 == 0 || current == totalFiles) {
+                            gui.UpdateProgress(current, totalFiles);
                         }
-                    } else {
-                        std::lock_guard<std::mutex> lock(output_mutex);
-                        std::cerr << "Failed to process " << file << std::endl;
                     }
-
-                    // Update GUI progress bar
-                    const int current = ++processedFiles;
-                    gui.UpdateProgress(current, totalFiles);
-                }
-            });
-        }
-
-        // Wait for all workers
-        for (auto& worker : workers) {
-            if (worker.joinable()) {
-                worker.join();
+                });
             }
-        }
 
-        log.close();
-        gui.ShowFinished(sharpFiles.load(), blurryFiles.load());
-        gui.SetCurrentDirectory(dirpath); 
+            // Wait for all workers
+            for (auto& worker : workers) {
+                if (worker.joinable()) {
+                    worker.join();
+                }
+            }
+
+            if (!cancel_requested && !gui.IsClosed()) {
+                gui.ShowFinished(sharpFiles.load(), blurryFiles.load());
+                gui.SetCurrentDirectory(dirpath);
+            }
+        });
+
         return true;
     }
 };
@@ -135,24 +146,17 @@ int main(int argc, char** argv) {
 
     if (argc > 1) {
         dirpath = argv[1];
-        if (dirpath.empty()) {
-            std::cerr << "No directory selected." << std::endl;
-            return 1;
+        if (!dirpath.empty()) {
+            app.processDirectory(dirpath, gui);
         }
-        return app.processDirectory(dirpath, gui) ? 0 : 1;
-    } else {
-        while (!gui.IsClosed()) {
-            std::cout << "Waiting for directory selection in GUI..." << std::endl;
-            dirpath = gui.SelectDirectory();
-
-            if (dirpath.empty()) {
-                break;
-            }
-
-            if (!app.processDirectory(dirpath, gui)) {
-                return 1;
-            }
-        }
-        return 0;
     }
+
+    while (!gui.IsClosed()) {
+        dirpath = gui.SelectDirectory();
+        if (!dirpath.empty()) {
+            app.processDirectory(dirpath, gui);
+        }
+    }
+
+    return 0;
 }
