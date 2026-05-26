@@ -465,10 +465,20 @@ static void load_current_image(ImageContext* ctx) {
     if (ctx->info_label) {
         std::string filename_only = std::filesystem::path(ctx->filename).filename().string();
         std::string res_text = (ctx->original_w > 0) ? (std::to_string(ctx->original_w) + " x " + std::to_string(ctx->original_h)) : "Unknown";
+        
+        std::string ai_text = "N/A";
+        if (ctx->callbacks.getAestheticScore) {
+            double score = ctx->callbacks.getAestheticScore(ctx->filename);
+            char buf[32];
+            snprintf(buf, sizeof(buf), "%.3f", score);
+            ai_text = buf;
+        }
+
         std::string info_text = 
             "<b>File:</b> " + filename_only + "\n"
             "<b>Status:</b> " + (ctx->isBlurry ? "<span foreground='red'>Blurry</span>" : "<span foreground='green'>Sharp</span>") + "\n"
-            "<b>Resolution:</b> " + res_text + "\n\n"
+            "<b>Resolution:</b> " + res_text + "\n"
+            "<b>AI Score:</b> <span foreground='#00BFFF'>" + ai_text + "</span>\n\n"
             + extract_image_info(ctx->filename);
 
         gtk_label_set_markup(GTK_LABEL(ctx->info_label), info_text.c_str());

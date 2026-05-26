@@ -322,6 +322,31 @@ static void open_viewer_for_result(const ResultData& result) {
             if (in && in.read(reinterpret_cast<char*>(features.data()), 512 * sizeof(float))) {
                 g_ctx->aestheticScorer->train(features, isGoodPhoto);
             }
+        },
+        [](const std::string& filename) -> double {
+            if (!g_ctx || !g_ctx->aestheticScorer) return 0.0;
+            
+            std::filesystem::path imgPath = filename;
+            std::filesystem::path clipFile = imgPath.parent_path() / ".laplacian_cache" / (imgPath.filename().string() + ".clip");
+            
+            std::vector<float> features(512);
+            std::ifstream in(clipFile, std::ios::binary);
+            if (in && in.read(reinterpret_cast<char*>(features.data()), 512 * sizeof(float))) {
+                ProcessingResult tempResult;
+                tempResult.sharedData["clip_vector"] = std::move(features);
+                
+                std::unique_ptr<ImageBuffer> dummyImg;
+                ProcessingContext dummyCtx;
+                
+                g_ctx->aestheticScorer->process(dummyImg, dummyCtx, tempResult);
+                
+                for (const auto& m : tempResult.metrics) {
+                    if (m.key == "aesthetic_score") {
+                        if (auto* v = std::get_if<double>(&m.value)) return *v;
+                    }
+                }
+            }
+            return 0.0;
         }
     });
 }

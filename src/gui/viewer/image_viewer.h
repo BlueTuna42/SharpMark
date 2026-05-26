@@ -14,6 +14,7 @@ struct ImageViewerCallbacks {
     std::function<bool(const std::string&, GtkWindow*)> deleteByFilename;
     std::function<void(int)> selectVisibleRow;
     std::function<void(const std::string&, bool)> trainAI; 
+    std::function<double(const std::string&)> getAestheticScore;
 };
 
 void open_image_viewer(GtkWindow* parent, const ResultData& result, int rawMode, const ImageViewerCallbacks& callbacks);
