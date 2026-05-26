@@ -56,36 +56,51 @@ void ClipEmbeddingProcessor::process(std::unique_ptr<ImageBuffer>& image, const 
         return;
     }
 
-    // 1. Resize and normalize image into a CHW tensor
     std::vector<float> inputTensorValues = prepareTensor(*image);
-    std::vector<int64_t> inputDims = {1, 3, 224, 224}; // Batch, Channels, Height, Width
+    std::vector<int64_t> inputDims = {1, 3, 224, 224}; 
     
     Ort::Value inputTensor = Ort::Value::CreateTensor<float>(
         memoryInfo_, inputTensorValues.data(), inputTensorValues.size(), inputDims.data(), inputDims.size());
 
-    // 2. Run Inference
-    const char* inputNames[] = {"input"};   // Note: Model specific, might be "pixel_values" depending on export
-    const char* outputNames[] = {"output"}; // Note: Model specific, might be "logits" or "embeddings"
+    try {
+        Ort::AllocatorWithDefaultOptions allocator;
+        
+        auto input_name_ptr = session_->GetInputNameAllocated(0, allocator);
+        auto output_name_ptr = session_->GetOutputNameAllocated(0, allocator);
+        
+        const char* inputNames[] = {input_name_ptr.get()};
+        const char* outputNames[] = {output_name_ptr.get()};
 
-    auto outputTensors = session_->Run(Ort::RunOptions{nullptr}, inputNames, &inputTensor, 1, outputNames, 1);
-    
-    // 3. Extract the 512D vector
-    float* floatArr = outputTensors.front().GetTensorMutableData<float>();
-    size_t featureSize = outputTensors.front().GetTensorTypeAndShapeInfo().GetElementCount();
-    
-    std::vector<float> features(floatArr, floatArr + featureSize);
+        auto outputTensors = session_->Run(Ort::RunOptions{nullptr}, inputNames, &inputTensor, 1, outputNames, 1);
+        
+        if (outputTensors.empty()) return;
 
-    // 4. Save to Blackboard
-    result.sharedData["clip_vector"] = features;
+        float* floatArr = outputTensors.front().GetTensorMutableData<float>();
+        size_t featureSize = outputTensors.front().GetTensorTypeAndShapeInfo().GetElementCount();
+        
+        if (featureSize != 512) {
+            result.warnings.push_back("Unexpected model size: " + std::to_string(featureSize));
+            return;
+        }
 
-    // 5. Save to Disk Cache
-    std::error_code ec;
-    if (!std::filesystem::exists(ctx.cacheDir, ec)) {
-        std::filesystem::create_directories(ctx.cacheDir, ec);
-    }
-    std::ofstream out(getCachePath(ctx), std::ios::binary);
-    if (out) {
-        out.write(reinterpret_cast<const char*>(features.data()), features.size() * sizeof(float));
+        std::vector<float> features(floatArr, floatArr + featureSize);
+
+        // Сначала сохраняем на диск
+        std::error_code ec;
+        if (!std::filesystem::exists(ctx.cacheDir, ec)) {
+            std::filesystem::create_directories(ctx.cacheDir, ec);
+        }
+        std::ofstream out(getCachePath(ctx), std::ios::binary);
+        if (out) {
+            out.write(reinterpret_cast<const char*>(features.data()), features.size() * sizeof(float));
+        }
+
+        result.sharedData["clip_vector"] = std::move(features);
+
+    } catch (const Ort::Exception& e) {
+        result.warnings.push_back(std::string("ONNX Inference Error: ") + e.what());
+    } catch (const std::exception& e) {
+        result.warnings.push_back(std::string("C++ Exception: ") + e.what());
     }
 #endif
 }
