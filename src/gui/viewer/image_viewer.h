@@ -2,6 +2,7 @@
 #define IMAGE_VIEWER_H
 
 #include "../results/result_store.h"
+#include "../gui.h"
 
 #include <functional>
 #include <gtk/gtk.h>
@@ -12,6 +13,7 @@ struct ImageViewerCallbacks {
     std::function<const ResultData*(int)> visibleAt;
     std::function<bool(const std::string&, GtkWindow*)> deleteByFilename;
     std::function<void(int)> selectVisibleRow;
+    std::function<void(const std::string&, bool)> trainAI; 
 };
 
 void open_image_viewer(GtkWindow* parent, const ResultData& result, int rawMode, const ImageViewerCallbacks& callbacks);

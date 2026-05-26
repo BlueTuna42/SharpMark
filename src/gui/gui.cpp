@@ -310,6 +310,18 @@ static void open_viewer_for_result(const ResultData& result) {
         },
         [](int index) {
             select_visible_result_row(index);
+        },
+        [](const std::string& filename, bool isGoodPhoto) {
+            if (!g_ctx || !g_ctx->aestheticScorer) return;
+            
+            std::filesystem::path imgPath = filename;
+            std::filesystem::path clipFile = imgPath.parent_path() / ".laplacian_cache" / (imgPath.filename().string() + ".clip");
+            
+            std::vector<float> features(512);
+            std::ifstream in(clipFile, std::ios::binary);
+            if (in && in.read(reinterpret_cast<char*>(features.data()), 512 * sizeof(float))) {
+                g_ctx->aestheticScorer->train(features, isGoodPhoto);
+            }
         }
     });
 }
@@ -969,6 +981,7 @@ static void run_gtk_thread() {
 VisualGUI::VisualGUI() {
     g_ctx = new GUIContext();
     load_settings(g_ctx->settings);
+    g_ctx->aestheticScorer = std::make_shared<AestheticScorer>(get_app_config_dir());
     g_ctx->gtkThread = std::thread(run_gtk_thread);
 }
 
@@ -1068,4 +1081,10 @@ bool VisualGUI::IsPaused() const {
 std::string VisualGUI::GetCurrentDir() const {
     std::lock_guard<std::mutex> lock(g_ctx->mtx);
     return g_ctx->currentDir;
+}
+
+void VisualGUI::TrainAI(const std::vector<float>& features, bool isGoodPhoto) {
+    if (g_ctx && g_ctx->aestheticScorer) {
+        g_ctx->aestheticScorer->train(features, isGoodPhoto);
+    }
 }

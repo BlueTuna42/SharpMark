@@ -2,7 +2,9 @@
 
 #include "../utils/path_utils.h"
 #include "preview_loader.h"
+#include "../../gui/gui.h"
 #include "../../img_tools/laplacian.h"
+#include "../../processors/aesthetic_scorer.h"
 #include <gtk/gtk.h>
 #include <string>
 #include <vector>
@@ -132,6 +134,15 @@ static void update_viewer_navigation_state(ImageContext* ctx);
 static void load_current_image(ImageContext* ctx);
 static void reset_zoom_to_fit(ImageContext* ctx);
 static void apply_zoom_sync(ImageContext* ctx);
+
+static void train_ai_from_viewer(ImageContext* ctx, bool isGoodPhoto) {
+    if (!ctx) return;
+    
+    if (ctx->callbacks.trainAI) {
+        ctx->callbacks.trainAI(ctx->filename, isGoodPhoto);
+        g_print("AI training signal sent! (%s)\n", isGoodPhoto ? "Good" : "Bad");
+    }
+}
 
 static void update_laplacian_toggle_state(ImageContext* ctx) {
     if (!ctx->laplacian_toggle) {
@@ -743,6 +754,20 @@ void open_image_viewer(GtkWindow* parent, const ResultData& result, int rawMode,
     g_signal_connect(ctx->previous_button, "clicked", G_CALLBACK(on_previous_clicked), ctx);
     gtk_box_pack_start(GTK_BOX(button_box), ctx->previous_button, TRUE, TRUE, 0);
 
+    GtkWidget* ai_good_btn = gtk_button_new_with_label("👍 Good");
+    gtk_box_pack_start(GTK_BOX(button_box), ai_good_btn, FALSE, FALSE, 5);
+    g_signal_connect(ai_good_btn, "clicked", G_CALLBACK(+[](GtkButton* btn, gpointer data) {
+        ImageContext* ictx = static_cast<ImageContext*>(data);
+        train_ai_from_viewer(ictx, true);
+    }), ctx);
+
+    GtkWidget* ai_bad_btn = gtk_button_new_with_label("👎 Bad");
+    gtk_box_pack_start(GTK_BOX(button_box), ai_bad_btn, FALSE, FALSE, 5);
+    g_signal_connect(ai_bad_btn, "clicked", G_CALLBACK(+[](GtkButton* btn, gpointer data) {
+        ImageContext* ictx = static_cast<ImageContext*>(data);
+        train_ai_from_viewer(ictx, false);
+    }), ctx);
+   /* 
     ctx->laplacian_toggle = gtk_toggle_button_new_with_label("Show Laplacian Edge Map");
     gtk_box_pack_start(GTK_BOX(button_box), ctx->laplacian_toggle, TRUE, TRUE, 0);
     g_signal_connect(ctx->laplacian_toggle, "toggled", G_CALLBACK(+[](GtkToggleButton* btn, gpointer data) {
@@ -753,7 +778,7 @@ void open_image_viewer(GtkWindow* parent, const ResultData& result, int rawMode,
         ctx->show_laplacian = gtk_toggle_button_get_active(btn);
         load_current_image(ctx); // Triggers visual mode switch
     }), ctx);
-
+    */
     ctx->next_button = gtk_button_new_with_label("Next");
     g_signal_connect(ctx->next_button, "clicked", G_CALLBACK(on_next_clicked), ctx);
     gtk_box_pack_start(GTK_BOX(button_box), ctx->next_button, TRUE, TRUE, 0);

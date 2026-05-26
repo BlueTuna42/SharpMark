@@ -2,6 +2,7 @@
 #define GUI_H
 
 #include <string>
+#include <vector>
 
 struct AppSettings {
     int themeMode = 0; // 0: System, 1: Light, 2: Dark
@@ -25,6 +26,7 @@ public:
     bool IsClosed() const;
     void TogglePause();
     bool IsPaused() const;
+    void TrainAI(const std::vector<float>& features, bool isGoodPhoto);
     std::string GetCurrentDir() const;
     
     AppSettings GetSettings() const;

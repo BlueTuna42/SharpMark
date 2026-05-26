@@ -2,6 +2,7 @@
 #define GUI_CONTEXT_H
 
 #include "results/result_store.h"
+#include "../processors/aesthetic_scorer.h"
 
 #include <condition_variable>
 #include <gtk/gtk.h>
@@ -57,6 +58,7 @@ struct GUIContext {
     std::atomic<bool> isPaused{false};
 
     std::thread gtkThread;
+    std::shared_ptr<AestheticScorer> aestheticScorer;
 };
 
 #endif
