@@ -1,27 +1,30 @@
 #ifndef STRUCT_H 
 #define STRUCT_H
 
-#include <iostream>
+#include <cstddef>
 #include <vector>
-#include <string>
 
-class GrayscaleImage {
+class ImageBuffer {
 public:
     int width;
     int height;
-    float *data;
+    int channels;
+    float *data; // 1 channel = Grayscale, 3 channels = RGB (Interleaved: RGBRGBRGB...)
 
-    GrayscaleImage(int w, int h) : width(w), height(h) {
-        size_t total = (size_t)width * height;
+    ImageBuffer(int w, int h, int c = 1) : width(w), height(h), channels(c) {
+        size_t total = (size_t)width * height * channels;
         data = new float[total]();
     }
 
-    ~GrayscaleImage() {
+    ~ImageBuffer() {
         if (data) delete[] data;
     }
 
-    GrayscaleImage(const GrayscaleImage&) = delete;
-    GrayscaleImage& operator=(const GrayscaleImage&) = delete;
+    ImageBuffer(const ImageBuffer&) = delete;
+    ImageBuffer& operator=(const ImageBuffer&) = delete;
 };
+
+// Alias to avoid breaking old Laplacian code that explicitly used "GrayscaleImage"
+using GrayscaleImage = ImageBuffer;
 
 #endif

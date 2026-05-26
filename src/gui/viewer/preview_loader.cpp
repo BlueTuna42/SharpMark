@@ -199,7 +199,7 @@ GdkPixbuf* load_preview_pixbuf(const std::string& filename, int maxWidth, int ma
         }
     }
 
-    auto image = ImageIO::readImage(filename, true);
+    auto image = ImageIO::readImage(filename, true, false);
     if (!image) {
         return nullptr;
     }

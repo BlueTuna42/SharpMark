@@ -18,6 +18,7 @@ struct ProcessingContext {
     std::filesystem::path filePath;
     AppSettings settings;
     std::filesystem::path cacheDir;
+    bool requireRGB = false;
 };
 
 struct ProcessingResult {

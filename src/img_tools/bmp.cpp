@@ -15,7 +15,7 @@
 #include "../Lib/stb_image.h"
 #include <libraw/libraw.h>
 
-std::unique_ptr<GrayscaleImage> ImageIO::readImage(const std::string& filename, int rawMode) {
+std::unique_ptr<ImageBuffer> ImageIO::readImage(const std::string& filename, int rawMode, bool wantRGB) {
     size_t extPos = filename.find_last_of('.');
     std::string ext = (extPos == std::string::npos) ? "" : filename.substr(extPos);
 
@@ -71,14 +71,21 @@ std::unique_ptr<GrayscaleImage> ImageIO::readImage(const std::string& filename, 
             return nullptr; 
         }
 
-        auto grayImg = std::make_unique<GrayscaleImage>(img->width, img->height);
+        int channels = wantRGB ? 3 : 1;
+        auto resultImg = std::make_unique<ImageBuffer>(img->width, img->height, channels);
         int total = img->width * img->height;
 
         auto process_chunk = [&](int start, int end) {
             for (int i = start; i < end; i++) {
-                grayImg->data[i] = 0.299f * img->data[i*3] + 
-                                   0.587f * img->data[i*3+1] + 
-                                   0.114f * img->data[i*3+2];
+                if (wantRGB) {
+                    resultImg->data[i*3 + 0] = static_cast<float>(img->data[i*3 + 0]); // R
+                    resultImg->data[i*3 + 1] = static_cast<float>(img->data[i*3 + 1]); // G
+                    resultImg->data[i*3 + 2] = static_cast<float>(img->data[i*3 + 2]); // B
+                } else {
+                    resultImg->data[i] = 0.299f * img->data[i*3] + 
+                                         0.587f * img->data[i*3+1] + 
+                                         0.114f * img->data[i*3+2];
+                }
             }
         };
 
@@ -86,7 +93,7 @@ std::unique_ptr<GrayscaleImage> ImageIO::readImage(const std::string& filename, 
 
         libraw_dcraw_clear_mem(img);
         libraw_close(lr);
-        return grayImg;
+        return resultImg;
     } else {
         int w, h, c;
         unsigned char *data = nullptr;
@@ -102,14 +109,21 @@ std::unique_ptr<GrayscaleImage> ImageIO::readImage(const std::string& filename, 
 #endif
         if (!data) return nullptr;
 
-        auto grayImg = std::make_unique<GrayscaleImage>(w, h);
+        int channels = wantRGB ? 3 : 1;
+        auto resultImg = std::make_unique<ImageBuffer>(w, h, channels);
         int total = w * h;
 
         auto process_chunk = [&](int start, int end) {
             for (int i = start; i < end; i++) {
-                grayImg->data[i] = 0.299f * data[i*3] + 
-                                   0.587f * data[i*3+1] + 
-                                   0.114f * data[i*3+2];
+                if (wantRGB) {
+                    resultImg->data[i*3 + 0] = static_cast<float>(data[i*3 + 0]);
+                    resultImg->data[i*3 + 1] = static_cast<float>(data[i*3 + 1]);
+                    resultImg->data[i*3 + 2] = static_cast<float>(data[i*3 + 2]);
+                } else {
+                    resultImg->data[i] = 0.299f * data[i*3] + 
+                                         0.587f * data[i*3+1] + 
+                                         0.114f * data[i*3+2];
+                }
             }
         };
 
@@ -119,7 +133,7 @@ std::unique_ptr<GrayscaleImage> ImageIO::readImage(const std::string& filename, 
         f1.wait();
 
         stbi_image_free(data);
-        return grayImg;
+        return resultImg;
     }
 }
 
