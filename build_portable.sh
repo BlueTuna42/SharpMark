@@ -48,6 +48,9 @@ echo "Copying dependencies to lib directory..."
 # Create the lib directory for DLLs
 mkdir -p "$PORTABLE_DIR/lib"
 
+# Copy ONNXruntime
+cp "onnxruntime/lib/onnxruntime.dll" "$PORTABLE_DIR/lib/"
+
 # Create a temporary file with a list of everything that requires DLLs
 TMP_LIST="dll_targets.txt"
 echo "$PORTABLE_DIR/SharpMark.exe" > "$TMP_LIST"

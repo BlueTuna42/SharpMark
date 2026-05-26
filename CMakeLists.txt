@@ -82,6 +82,8 @@ set(SOURCES
     src/gui/results/result_store.cpp
     src/gui/status/progress_summary.cpp
     src/gui/gui.cpp
+    src/processors/clip_embedding.cpp
+    src/processors/aesthetic_scorer.cpp
 )
 
 if(WIN32)
@@ -107,6 +109,39 @@ endif()
 target_link_libraries(SharpMark PRIVATE Threads::Threads)
 if(UNIX)
     target_link_libraries(SharpMark PRIVATE m)
+endif()
+
+# --- ONNX Runtime (Local Binaries) ---
+set(ONNXRUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/onnxruntime")
+
+if(EXISTS "${ONNXRUNTIME_DIR}/include/onnxruntime_cxx_api.h")
+    message(STATUS "${ColorGreen}ONNX Runtime found locally at ${ONNXRUNTIME_DIR}${ColorReset}")
+    
+    # Include headers
+    target_include_directories(SharpMark PRIVATE "${ONNXRUNTIME_DIR}/include")
+    
+    # Link the library depending on OS
+    if(WIN32)
+        # Windows: Link against the .lib file
+        target_link_libraries(SharpMark PRIVATE "${ONNXRUNTIME_DIR}/lib/onnxruntime.lib")
+        
+        # We also need to copy the DLL to the build folder so the app runs during dev
+        add_custom_command(TARGET SharpMark POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${ONNXRUNTIME_DIR}/lib/onnxruntime.dll"
+            $<TARGET_FILE_DIR:SharpMark>
+        )
+    elseif(UNIX AND NOT APPLE)
+        # Linux: Link against the .so file
+        target_link_libraries(SharpMark PRIVATE "${ONNXRUNTIME_DIR}/lib/libonnxruntime.so")
+        
+        # Set RPATH so it finds the .so locally
+        set_target_properties(SharpMark PROPERTIES INSTALL_RPATH "$ORIGIN/../lib")
+    endif()
+
+    add_definitions(-DUSE_ONNXRUNTIME)
+else()
+    message(WARNING "${ColorRed}ONNX Runtime local folder not found! AI features disabled.${ColorReset}")
 endif()
 
 if(UNIX AND NOT APPLE)

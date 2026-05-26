@@ -39,21 +39,40 @@ double LaplacianProcessor::blockVariance(const GrayscaleImage& img, int startX, 
 }
 
 double LaplacianProcessor::evaluateSharpness(const GrayscaleImage& img, int gridCols, int gridRows) {
-    int blockW = img.width / gridCols;
-    int blockH = img.height / gridRows;
-    
+    std::unique_ptr<GrayscaleImage> convertedGray;
+    const GrayscaleImage* sourceImgPtr = &img;
+
+    if (img.channels == 3) {
+        convertedGray = std::make_unique<GrayscaleImage>(img.width, img.height, 1);
+        const int total = img.width * img.height;
+
+        for (int i = 0; i < total; ++i) {
+            convertedGray->data[i] =
+                0.299f * img.data[i * 3 + 0] +
+                0.587f * img.data[i * 3 + 1] +
+                0.114f * img.data[i * 3 + 2];
+        }
+
+        sourceImgPtr = convertedGray.get();
+    }
+
+    const GrayscaleImage& sourceImg = *sourceImgPtr;
+
+    int blockW = sourceImg.width / gridCols;
+    int blockH = sourceImg.height / gridRows;
     double maxVar = 0.0;
 
     for (int r = 0; r < gridRows; ++r) {
         for (int c = 0; c < gridCols; ++c) {
             int startX = c * blockW;
             int startY = r * blockH;
-            
-            int curW = (c == gridCols - 1) ? (img.width - startX) : blockW;
-            int curH = (r == gridRows - 1) ? (img.height - startY) : blockH;
+            int curW = (c == gridCols - 1) ? (sourceImg.width - startX) : blockW;
+            int curH = (r == gridRows - 1) ? (sourceImg.height - startY) : blockH;
 
-            double var = blockVariance(img, startX, startY, curW, curH);
-            maxVar = std::max(maxVar, var);
+            double var = blockVariance(sourceImg, startX, startY, curW, curH);
+            if (var > maxVar) {
+                maxVar = var;
+            }
         }
     }
 

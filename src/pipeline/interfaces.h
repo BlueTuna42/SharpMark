@@ -27,7 +27,7 @@ struct ProcessingResult {
     std::vector<std::string> processorsRun;
     std::vector<AnalysisValue> metrics;
     std::vector<std::string> warnings;
-    std::unordered_map<std::string, std::variant<int, double, bool, std::string>> sharedData;
+    std::unordered_map<std::string, std::variant<int, double, bool, std::string, std::vector<float>>> sharedData;
 };
 
 class IImageProcessor {

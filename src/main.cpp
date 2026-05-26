@@ -17,12 +17,16 @@
 #include "gui/gui.h"
 #include "pipeline/interfaces.h"
 #include "pipeline/runner.h"
+#include "gui/utils/path_utils.h"
+#include "img_tools/bmp.h"
+
 #include "loaders/bmp_loader.h"
 #include "processors/laplacian_focus.h"
 #include "processors/state_cache.h"
+#include "processors/clip_embedding.h"
+#include "processors/aesthetic_scorer.h"
 #include "postprocessors/xmp_rating.h"
 #include "postprocessors/state_cache.h"
-#include "img_tools/bmp.h"
 
 
 class FocusCheckerApp {
@@ -35,7 +39,10 @@ private:
         PipelineRunner runner;
         runner.setLoader(std::make_unique<DefaultImageLoader>());
         runner.addProcessor(std::make_unique<StateCacheProcessor>());
-        runner.addProcessor(std::make_unique<LaplacianFocusProcessor>());
+        runner.addProcessor(std::make_unique<ClipEmbeddingProcessor>("vision_model_quantized.onnx"));
+        std::filesystem::path configDir = get_app_config_dir();
+        runner.addProcessor(std::make_unique<AestheticScorer>(configDir));
+        //runner.addProcessor(std::make_unique<LaplacianFocusProcessor>());
         runner.addPostProcessor(std::make_unique<XmpRatingPostProcessor>());
         runner.addPostProcessor(std::make_unique<StateCachePostProcessor>());
         return runner;
@@ -81,11 +88,10 @@ public:
             const unsigned int threadsToUse = (numThreads > 1) ? numThreads - 2 : 1;
             std::vector<std::thread> workers;
 
-            #ifdef _WIN32
-            std::ofstream log("NUL");
-            #else
-            std::ofstream log("/dev/null");
-            #endif
+            std::ofstream debug_log("sharpmark_debug.log", std::ios::out | std::ios::trunc);
+            if (!debug_log) {
+                debug_log.open("C:\\sharpmark_debug.log", std::ios::out | std::ios::trunc);
+            }
 
             for (unsigned int i = 0; i < threadsToUse; ++i) {
                 workers.emplace_back([&]() {
@@ -103,19 +109,37 @@ public:
                         size_t idx = fileIndex.fetch_add(1, std::memory_order_relaxed);
                         if (idx >= files.size()) break;
 
-                        const std::string& file = files[idx];
+                        const std::string& currentFilePath = files[idx];
                         
                         ProcessingContext ctx;
-                        ctx.rawFilePath = file;
+                        ctx.rawFilePath = currentFilePath;
                         ctx.settings = settings;
                         #ifdef _WIN32
-                        ctx.filePath = std::filesystem::u8path(file);
+                        ctx.filePath = std::filesystem::u8path(currentFilePath);
                         #else
-                        ctx.filePath = std::filesystem::path(file);
+                        ctx.filePath = std::filesystem::path(currentFilePath);
                         #endif
                         ctx.cacheDir = ctx.filePath.parent_path() / ".laplacian_cache";
 
                         ProcessingResult result = runner.run(ctx);
+
+                        if (!result.warnings.empty()) {
+                            std::lock_guard<std::mutex> lock(output_mutex);
+                            debug_log << "[WARNING] " << currentFilePath << ":\n";
+                            for (const auto& w : result.warnings) {
+                                debug_log << "  -> " << w << "\n";
+                            }
+                            debug_log.flush();
+                        }
+    
+                        if (result.success) {
+                            auto it = result.sharedData.find("clip_vector");
+                            if (it == result.sharedData.end()) {
+                                std::lock_guard<std::mutex> lock(output_mutex);
+                                debug_log << "[ERROR] No clip_vector in sharedData for " << currentFilePath << "!\n";
+                                debug_log.flush();
+                            }
+                        }
 
                         if (result.success) {
                             if (result.isBlurry) {
@@ -125,12 +149,12 @@ public:
                             }
 
                             int w = 0, h = 0;
-                            ImageIO::readOriginalSize(file, w, h);
-                            gui.AddResult(file, result.isBlurry, w, h);
+                            ImageIO::readOriginalSize(currentFilePath, w, h);
+                            gui.AddResult(currentFilePath, result.isBlurry, w, h);
 
                             std::lock_guard<std::mutex> lock(output_mutex);
-                            if (result.isBlurry && log.is_open()) {
-                                log << file << std::endl;
+                            if (result.isBlurry && debug_log.is_open()) {
+                                debug_log << currentFilePath << std::endl;
                             }
                         }
 

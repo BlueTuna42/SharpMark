@@ -804,32 +804,7 @@ static void apply_theme(int themeMode) {
 // Settings action
 
 static std::filesystem::path get_settings_file_path() {
-#ifdef _WIN32
-    // Portable Windows mode: save next to the executable
-    wchar_t buffer[MAX_PATH];
-    GetModuleFileNameW(NULL, buffer, MAX_PATH);
-    std::filesystem::path exePath(buffer);
-    return exePath.parent_path() / "settings.conf";
-#else
-    // Linux/macOS mode: save in user's config directory
-    std::filesystem::path configDir;
-    const char *homeDir = getenv("HOME");
-    if (!homeDir) {
-        struct passwd *pwd = getpwuid(getuid());
-        if (pwd) homeDir = pwd->pw_dir;
-    }
-    if (homeDir) {
-        configDir = std::filesystem::path(homeDir) / ".config" / "SharpMark";
-    } else {
-        configDir = std::filesystem::current_path() / ".sharpmark";
-    }
-
-    if (!std::filesystem::exists(configDir)) {
-        std::error_code ec;
-        std::filesystem::create_directories(configDir, ec);
-    }
-    return configDir / "settings.conf";
-#endif
+    return get_app_config_dir() / "settings.conf";
 }
 
 static void load_settings(AppSettings& settings) {

@@ -23,6 +23,8 @@
 *.a
 *.la
 *.lo
+*onnxruntime
+models/
 
 # Shared objects (inc. Windows DLLs)
 *.dll
