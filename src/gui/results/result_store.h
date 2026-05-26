@@ -9,6 +9,9 @@ struct ResultData {
     std::string filename;
     bool isBlurry;
     GdkPixbuf *thumbnail = nullptr;
+
+    int width = 0;
+    int height = 0;
 };
 
 enum class SortMode {

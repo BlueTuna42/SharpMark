@@ -22,6 +22,7 @@
 #include "processors/state_cache.h"
 #include "postprocessors/xmp_rating.h"
 #include "postprocessors/state_cache.h"
+#include "img_tools/bmp.h"
 
 
 class FocusCheckerApp {
@@ -77,7 +78,7 @@ public:
             std::atomic<size_t> fileIndex{0};
 
             const unsigned int numThreads = std::thread::hardware_concurrency();
-            const unsigned int threadsToUse = (numThreads > 1) ? numThreads - 1 : 1;
+            const unsigned int threadsToUse = (numThreads > 1) ? numThreads - 2 : 1;
             std::vector<std::thread> workers;
 
             #ifdef _WIN32
@@ -123,7 +124,9 @@ public:
                                  ++sharpFiles;
                             }
 
-                            gui.AddResult(file, result.isBlurry);
+                            int w = 0, h = 0;
+                            ImageIO::readOriginalSize(file, w, h);
+                            gui.AddResult(file, result.isBlurry, w, h);
 
                             std::lock_guard<std::mutex> lock(output_mutex);
                             if (result.isBlurry && log.is_open()) {

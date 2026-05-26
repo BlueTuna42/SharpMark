@@ -16,6 +16,13 @@ public:
             std::filesystem::create_directories(ctx.cacheDir, ec);
         }
         std::ofstream out(ctx.cacheDir / "state.csv", std::ios::app);
-        out << ctx.rawFilePath << "," << (result.isBlurry ? "1" : "0") << "\n";
+        double variance = 0.0;
+        auto it = result.sharedData.find("laplacian_variance");
+        if (it != result.sharedData.end()) {
+            if (auto* v = std::get_if<double>(&it->second)) {
+                variance = *v;
+            }
+        }
+        out << ctx.rawFilePath << "," << (result.isBlurry ? "1" : "0") << "," << variance << "\n";
     }
 };

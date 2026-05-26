@@ -122,3 +122,47 @@ std::unique_ptr<GrayscaleImage> ImageIO::readImage(const std::string& filename, 
         return grayImg;
     }
 }
+
+bool ImageIO::readOriginalSize(const std::string& filename, int& w, int& h) {
+    size_t extPos = filename.find_last_of('.');
+    std::string ext = (extPos == std::string::npos) ? "" : filename.substr(extPos);
+    bool isRaw = (strcasecmp(ext.c_str(), ".CR2") == 0 || strcasecmp(ext.c_str(), ".NEF") == 0 ||
+                  strcasecmp(ext.c_str(), ".ARW") == 0 || strcasecmp(ext.c_str(), ".DNG") == 0 ||
+                  strcasecmp(ext.c_str(), ".RW2") == 0 || strcasecmp(ext.c_str(), ".RAF") == 0);
+
+#ifdef _WIN32
+    std::wstring w_filename = std::filesystem::u8path(filename).wstring();
+#endif
+
+    if (isRaw) {
+        libraw_data_t *lr = libraw_init(0);
+        if (!lr) return false;
+        
+        int openResult = LIBRAW_SUCCESS;
+#ifdef _WIN32
+        openResult = libraw_open_wfile(lr, w_filename.c_str());
+#else
+        openResult = libraw_open_file(lr, filename.c_str());
+#endif
+        if (openResult == LIBRAW_SUCCESS) {
+            w = lr->sizes.width;
+            h = lr->sizes.height;
+            libraw_close(lr);
+            return true;
+        }
+        libraw_close(lr);
+    } else {
+        int comp;
+#ifdef _WIN32
+        FILE* f = _wfopen(w_filename.c_str(), L"rb");
+        if (f) {
+            int res = stbi_info_from_file(f, &w, &h, &comp);
+            fclose(f);
+            return res != 0;
+        }
+#else
+        return stbi_info(filename.c_str(), &w, &h, &comp) != 0;
+#endif
+    }
+    return false;
+}

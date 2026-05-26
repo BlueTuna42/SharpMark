@@ -9,6 +9,10 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <libraw/libraw.h>
+#include <fstream>
+#include <sstream>
+#include <iomanip>
 
 static constexpr double kMinZoomLevel = 0.01;
 static constexpr double kMaxZoomLevel = 2.0;
@@ -90,6 +94,11 @@ struct ImageContext {
     GtkWidget *previous_button = nullptr;
     GtkWidget *next_button = nullptr;
     GtkWidget *laplacian_toggle = nullptr;
+    GtkWidget *sidebar_revealer = nullptr; 
+    GtkWidget *sidebar_box = nullptr;      
+    GtkWidget *histogram_area = nullptr;   
+    GtkWidget *info_label = nullptr;       
+    GtkWidget *sidebar_toggle_btn = nullptr; 
     ImageViewerCallbacks callbacks;
 
     GdkPixbuf *original_pixbuf = nullptr; 
@@ -112,6 +121,9 @@ struct ImageContext {
     // Window states
     bool initial_fit_done = false;
     bool is_fullscreen = false;
+
+    int original_w = 0;
+    int original_h = 0; 
 
     int rawMode = 0;
 };
@@ -336,6 +348,59 @@ static void on_viewer_destroy(GtkWidget* widget, gpointer data) {
     if (ctx->original_pixbuf) g_object_unref(ctx->original_pixbuf);
     delete ctx;
 }
+static std::string extract_image_info(const std::string& filepath) {
+    std::ostringstream ss;
+    
+    // Try to load varience from cahce
+    double variance = -1.0;
+    std::filesystem::path p(filepath);
+    std::filesystem::path cacheFile = p.parent_path() / ".laplacian_cache" / "state.csv";
+    if (std::filesystem::exists(cacheFile)) {
+        std::ifstream in(cacheFile);
+        std::string line;
+        while (std::getline(in, line)) {
+            std::istringstream iss(line);
+            std::string path, blurry, varStr;
+             if (std::getline(iss, path, ',') && std::getline(iss, blurry, ',')) {
+                if (path == filepath) {
+                    if (std::getline(iss, varStr) && !varStr.empty()) {
+                        variance = std::stod(varStr);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    // Read EXIF using LibRaw
+    libraw_data_t *lr = libraw_init(0);
+    if (lr) {
+        int open_result = 0;
+#ifdef _WIN32
+        std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+        std::wstring wfilename = converter.from_bytes(filepath);
+        open_result = libraw_open_wfile(lr, wfilename.c_str());
+#else
+        open_result = libraw_open_file(lr, filepath.c_str());
+#endif
+        if (open_result == LIBRAW_SUCCESS) {
+            ss << "<b>Camera:</b> " << lr->idata.make << " " << lr->idata.model << "\n";
+            ss << "<b>Lens:</b> " << lr->lens.Lens << "\n";
+            ss << "<b>Date:</b> " << std::put_time(std::localtime(&lr->other.timestamp), "%Y-%m-%d %H:%M:%S") << "\n\n";
+            ss << "<b>Aperture:</b> f/" << lr->other.aperture << "\n";
+            ss << "<b>Shutter:</b> 1/" << (int)(1.0f / lr->other.shutter) << "s\n";
+            ss << "<b>ISO:</b> " << lr->other.iso_speed << "\n";
+            ss << "<b>Focal Length:</b> " << lr->other.focal_len << "mm\n";
+        }
+        libraw_close(lr);
+    }
+
+    if (variance >= 0.0) {
+        ss << "\n<b>Laplacian Variance:</b> " << std::fixed << std::setprecision(2) << variance;
+    }
+
+    return ss.str();
+}
 
 static void load_current_image(ImageContext* ctx) {
     if (ctx->original_pixbuf) {
@@ -363,10 +428,14 @@ static void load_current_image(ImageContext* ctx) {
         ctx->original_pixbuf = load_preview_pixbuf(ctx->filename, 8192, 8192, ctx->rawMode); 
     }
 
+    int original_w = 0;
+    int original_h = 0;
+
     if (ctx->original_pixbuf) {
-        int w = gdk_pixbuf_get_width(ctx->original_pixbuf);
-        int h = gdk_pixbuf_get_height(ctx->original_pixbuf);
-        int dynamicBorder = std::max(8, std::min(w, h) / 100);
+        original_w = gdk_pixbuf_get_width(ctx->original_pixbuf);
+        original_h = gdk_pixbuf_get_height(ctx->original_pixbuf);
+        
+        int dynamicBorder = std::max(8, std::min(original_w, original_h) / 100);
 
         ctx->original_pixbuf = add_status_border(ctx->original_pixbuf, ctx->isBlurry, dynamicBorder);
 
@@ -381,6 +450,18 @@ static void load_current_image(ImageContext* ctx) {
     if (ctx->show_laplacian) title += " [LAPLACIAN CACHE]";
     gtk_window_set_title(GTK_WINDOW(ctx->viewer_window), title.c_str());
     update_viewer_navigation_state(ctx);
+
+    if (ctx->info_label) {
+        std::string filename_only = std::filesystem::path(ctx->filename).filename().string();
+        std::string res_text = (ctx->original_w > 0) ? (std::to_string(ctx->original_w) + " x " + std::to_string(ctx->original_h)) : "Unknown";
+        std::string info_text = 
+            "<b>File:</b> " + filename_only + "\n"
+            "<b>Status:</b> " + (ctx->isBlurry ? "<span foreground='red'>Blurry</span>" : "<span foreground='green'>Sharp</span>") + "\n"
+            "<b>Resolution:</b> " + res_text + "\n\n"
+            + extract_image_info(ctx->filename);
+
+        gtk_label_set_markup(GTK_LABEL(ctx->info_label), info_text.c_str());
+    }
 }
 
 static void on_previous_clicked(GtkButton* button, gpointer data) {
@@ -391,6 +472,8 @@ static void on_previous_clicked(GtkButton* button, gpointer data) {
         if (prevResult) {
             ctx->filename = prevResult->filename;
             ctx->isBlurry = prevResult->isBlurry;
+            ctx->original_w = prevResult->width;
+            ctx->original_h = prevResult->height;
             load_current_image(ctx);
             if (ctx->callbacks.selectVisibleRow) ctx->callbacks.selectVisibleRow(currentIndex - 1);
         }
@@ -405,6 +488,8 @@ static void on_next_clicked(GtkButton* button, gpointer data) {
         if (nextResult) {
             ctx->filename = nextResult->filename;
             ctx->isBlurry = nextResult->isBlurry;
+            ctx->original_w = nextResult->width;
+            ctx->original_h = nextResult->height;
             load_current_image(ctx);
             if (ctx->callbacks.selectVisibleRow) ctx->callbacks.selectVisibleRow(currentIndex + 1);
         }
@@ -446,6 +531,8 @@ static gboolean on_viewer_key_press(GtkWidget* widget, GdkEventKey* event, gpoin
                 if (newResult) {
                     ctx->filename = newResult->filename;
                     ctx->isBlurry = newResult->isBlurry;
+                    ctx->original_w = newResult->width;
+                    ctx->original_h = newResult->height;
                     load_current_image(ctx);
                     if (ctx->callbacks.selectVisibleRow) {
                         ctx->callbacks.selectVisibleRow(ctx->callbacks.visibleIndexForFilename(ctx->filename));
@@ -477,10 +564,79 @@ static void update_viewer_navigation_state(ImageContext* ctx) {
     gtk_widget_set_sensitive(ctx->next_button, hasNext);
 }
 
+static gboolean on_histogram_draw(GtkWidget* widget, cairo_t* cr, gpointer data) {
+    ImageContext* ctx = static_cast<ImageContext*>(data);
+    if (!ctx->original_pixbuf) return FALSE;
+
+    guint width = gtk_widget_get_allocated_width(widget);
+    guint height = gtk_widget_get_allocated_height(widget);
+
+    cairo_set_source_rgb(cr, 0.15, 0.15, 0.15);
+    cairo_paint(cr);
+
+    int w = gdk_pixbuf_get_width(ctx->original_pixbuf);
+    int h = gdk_pixbuf_get_height(ctx->original_pixbuf);
+    int rowstride = gdk_pixbuf_get_rowstride(ctx->original_pixbuf);
+    guchar* pixels = gdk_pixbuf_get_pixels(ctx->original_pixbuf);
+
+    int hist_r[256] = {0}, hist_g[256] = {0}, hist_b[256] = {0}, hist_l[256] = {0};
+    int max_count = 0;
+
+    // Boarder margin
+    int margin = 50; 
+    
+    // 4 step for better performance
+    for (int y = margin; y < h - margin; y += 4) {
+        guchar* row = pixels + y * rowstride;
+        for (int x = margin; x < w - margin; x += 4) {
+            guchar r = row[x * 3];
+            guchar g = row[x * 3 + 1];
+            guchar b = row[x * 3 + 2];
+            int luma = (r * 299 + g * 587 + b * 114) / 1000;
+            
+            hist_r[r]++;
+            hist_g[g]++;
+            hist_b[b]++;
+            hist_l[luma]++;
+            
+            if (hist_l[luma] > max_count) max_count = hist_l[luma];
+        }
+    }
+
+    if (max_count == 0) return FALSE;
+
+    cairo_set_operator(cr, CAIRO_OPERATOR_ADD);
+
+    auto draw_channel = [&](int* hist, double r, double g, double b, double alpha) {
+        cairo_set_source_rgba(cr, r, g, b, alpha);
+        cairo_move_to(cr, 0, height);
+        for (int i = 0; i < 256; ++i) {
+            double x = (i / 255.0) * width;       
+            double val = std::pow((double)hist[i] / max_count, 0.5); 
+            double y = height - (val * height * 0.95);
+            cairo_line_to(cr, x, y);
+        }
+        cairo_line_to(cr, width, height);
+        cairo_close_path(cr);
+        cairo_fill(cr);
+    };
+
+    draw_channel(hist_r, 1.0, 0.0, 0.0, 0.6);
+    draw_channel(hist_g, 0.0, 1.0, 0.0, 0.6);
+    draw_channel(hist_b, 0.0, 0.0, 1.0, 0.6);
+    
+    cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+    draw_channel(hist_l, 1.0, 1.0, 1.0, 0.25);
+
+    return FALSE;
+}
+
 void open_image_viewer(GtkWindow* parent, const ResultData& result, int rawMode, const ImageViewerCallbacks& callbacks) {
     ImageContext* ctx = new ImageContext();
     ctx->filename = result.filename;
     ctx->isBlurry = result.isBlurry;
+    ctx->original_w = result.width;
+    ctx->original_h = result.height;
     ctx->rawMode = rawMode;
     ctx->callbacks = callbacks;
 
@@ -529,7 +685,56 @@ void open_image_viewer(GtkWindow* parent, const ResultData& result, int rawMode,
     g_signal_connect(ctx->scrolled, "size-allocate", G_CALLBACK(on_scrolled_size_allocate), ctx);
 
     gtk_container_add(GTK_CONTAINER(ctx->scrolled), event_box);
-    gtk_box_pack_start(GTK_BOX(vbox), ctx->scrolled, TRUE, TRUE, 0);
+    GtkWidget *hbox_main = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_box_pack_start(GTK_BOX(vbox), hbox_main, TRUE, TRUE, 0);
+
+    gtk_box_pack_start(GTK_BOX(hbox_main), ctx->scrolled, TRUE, TRUE, 0);
+
+    GtkWidget *toggle_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_valign(toggle_vbox, GTK_ALIGN_CENTER);
+    gtk_box_pack_start(GTK_BOX(hbox_main), toggle_vbox, FALSE, FALSE, 0);
+
+    ctx->sidebar_toggle_btn = gtk_toggle_button_new_with_label("▶");
+    gtk_style_context_add_class(gtk_widget_get_style_context(ctx->sidebar_toggle_btn), "flat");
+    gtk_widget_set_size_request(ctx->sidebar_toggle_btn, 24, 60);
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(ctx->sidebar_toggle_btn), TRUE);
+    gtk_box_pack_start(GTK_BOX(toggle_vbox), ctx->sidebar_toggle_btn, FALSE, FALSE, 0);
+
+    ctx->sidebar_revealer = gtk_revealer_new();
+    gtk_revealer_set_transition_type(GTK_REVEALER(ctx->sidebar_revealer), GTK_REVEALER_TRANSITION_TYPE_SLIDE_LEFT);
+    gtk_revealer_set_transition_duration(GTK_REVEALER(ctx->sidebar_revealer), 250);
+    gtk_revealer_set_reveal_child(GTK_REVEALER(ctx->sidebar_revealer), TRUE);
+    gtk_box_pack_start(GTK_BOX(hbox_main), ctx->sidebar_revealer, FALSE, FALSE, 0);
+
+    ctx->sidebar_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_widget_set_size_request(ctx->sidebar_box, 300, -1);
+    gtk_container_set_border_width(GTK_CONTAINER(ctx->sidebar_box), 15);
+    gtk_style_context_add_class(gtk_widget_get_style_context(ctx->sidebar_box), "background"); 
+    gtk_container_add(GTK_CONTAINER(ctx->sidebar_revealer), ctx->sidebar_box);
+
+    GtkWidget *sidebar_title = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(sidebar_title), "<b>Metadata & Analysis</b>");
+    gtk_widget_set_halign(sidebar_title, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(ctx->sidebar_box), sidebar_title, FALSE, FALSE, 0);
+
+    ctx->histogram_area = gtk_drawing_area_new();
+    gtk_widget_set_size_request(ctx->histogram_area, -1, 150);
+    g_signal_connect(ctx->histogram_area, "draw", G_CALLBACK(on_histogram_draw), ctx);
+    gtk_box_pack_start(GTK_BOX(ctx->sidebar_box), ctx->histogram_area, FALSE, FALSE, 10);
+
+    ctx->info_label = gtk_label_new("");
+    gtk_label_set_use_markup(GTK_LABEL(ctx->info_label), TRUE);
+    gtk_widget_set_halign(ctx->info_label, GTK_ALIGN_START);
+    gtk_widget_set_valign(ctx->info_label, GTK_ALIGN_START);
+    gtk_label_set_line_wrap(GTK_LABEL(ctx->info_label), TRUE);
+    gtk_box_pack_start(GTK_BOX(ctx->sidebar_box), ctx->info_label, TRUE, TRUE, 0);
+    
+    g_signal_connect(ctx->sidebar_toggle_btn, "toggled", G_CALLBACK(+[](GtkToggleButton* btn, gpointer data) {
+        ImageContext* ctx = static_cast<ImageContext*>(data);
+        bool active = gtk_toggle_button_get_active(btn);
+        gtk_button_set_label(GTK_BUTTON(btn), active ? "▶" : "◀");
+        gtk_revealer_set_reveal_child(GTK_REVEALER(ctx->sidebar_revealer), active);
+    }), ctx);
 
     GtkWidget *button_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     gtk_box_pack_start(GTK_BOX(vbox), button_box, FALSE, FALSE, 5);

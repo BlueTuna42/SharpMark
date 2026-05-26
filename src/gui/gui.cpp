@@ -344,7 +344,7 @@ static gboolean on_file_processed(gpointer data) {
     result.thumbnail = add_status_border(load_preview_pixbuf(result.filename, 150, 150), result.isBlurry);
     const ResultData& storedResult = g_ctx->results.add(result);
     if (g_ctx->sortMode == SortMode::Default) {
-        result_list_view_append(current_result_list_view(), storedResult, true);
+        result_list_view_append(current_result_list_view(), storedResult, false);
     } else {
         rebuild_result_list();
     }
@@ -1025,9 +1025,15 @@ void VisualGUI::SetCurrentDirectory(const std::string& dirpath) {
     g_idle_add(on_directory_changed, directory);
 }
 
-void VisualGUI::AddResult(const std::string& filename, bool isBlurry) {
+void VisualGUI::AddResult(const std::string& filename, bool isBlurry, int width, int height) {
     if (!g_ctx || !g_ctx->window) return;
-    ResultData* res = new ResultData{filename, isBlurry};
+    
+    ResultData* res = new ResultData();
+    res->filename = filename;
+    res->isBlurry = isBlurry;
+    res->width = width;
+    res->height = height;
+    
     g_idle_add(on_file_processed, res); 
 }
 
