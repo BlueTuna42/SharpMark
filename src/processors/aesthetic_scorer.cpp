@@ -56,27 +56,21 @@ void AestheticScorer::process(std::unique_ptr<ImageBuffer>& image, const Process
 void AestheticScorer::train(const std::vector<float>& features, bool isGoodPhoto) {
     if (features.size() != 512) return;
 
-    // Simple Hebbian Learning / Prototype update
-    // Learning rate controls how fast the AI changes its mind
-    const float learning_rate = 0.1f; 
-    const float direction = isGoodPhoto ? 1.0f : -1.0f;
-
     std::lock_guard<std::mutex> lock(weights_mtx_);
-    
-    // Update weights
-    float magnitude_sq = 0.0f;
+
+    float current_score = 0.0f;
     for (size_t i = 0; i < 512; ++i) {
-        user_weights_[i] += learning_rate * direction * features[i];
-        magnitude_sq += user_weights_[i] * user_weights_[i];
+        current_score += user_weights_[i] * features[i];
     }
 
-    // Normalize weights to prevent values from exploding over time
-    if (magnitude_sq > 0.0f) {
-        float magnitude = std::sqrt(magnitude_sq);
-        for (size_t i = 0; i < 512; ++i) {
-            user_weights_[i] /= magnitude;
-        }
-    }
+    float target_score = isGoodPhoto ? 1.0f : -1.0f;
 
+    float error = target_score - current_score;
+
+    const float learning_rate = 0.05f; 
+
+    for (size_t i = 0; i < 512; ++i) {
+        user_weights_[i] += learning_rate * error * features[i];
+    }
     saveWeights();
 }

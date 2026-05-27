@@ -85,7 +85,18 @@ void ClipEmbeddingProcessor::process(std::unique_ptr<ImageBuffer>& image, const 
 
         std::vector<float> features(floatArr, floatArr + featureSize);
 
-        // Сначала сохраняем на диск
+        // L2 Normalization
+         float sum_sq = 0.0f;
+        for (float v : features) {
+            sum_sq += v * v;
+        }
+        if (sum_sq > 0.0f) {
+            float length = std::sqrt(sum_sq);
+            for (float& v : features) {
+                v /= length;
+            }
+        }
+
         std::error_code ec;
         if (!std::filesystem::exists(ctx.cacheDir, ec)) {
             std::filesystem::create_directories(ctx.cacheDir, ec);
