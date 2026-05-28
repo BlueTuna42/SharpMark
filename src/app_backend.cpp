@@ -59,68 +59,54 @@ void AppBackend::selectFolder(const QString &folderPath) {
         cleanPath = cleanPath.mid(7);
 #endif
     }
-    
     m_currentFolder = cleanPath;
     setStatusText("Selected: " + m_currentFolder);
+    
+    // 1. FAST SCAN DIRECTORY IMMEDIATELY
+    m_files = Scanner::scanFiles(m_currentFolder.toStdString());
+    setTotalFiles(static_cast<int>(m_files.size()));
+    setProgress(0);
+    
+    // 2. EMIT TO QML INSTANTLY
+    for (size_t i = 0; i < m_files.size(); ++i) {
+        QString absolutePath = QString::fromStdString(m_files[i]);
+        QString fileName = QFileInfo(absolutePath).fileName();
+        emit fileFound(fileName, absolutePath, static_cast<int>(i));
+    }
 }
 
 void AppBackend::startScan() {
-    if (m_currentFolder.isEmpty() || m_isScanning) return;
+    if (m_files.empty() || m_isScanning) return;
 
     m_isScanning = true;
     m_cancelRequested = false;
     setProgress(0);
-    setTotalFiles(0);
     setStatusText("Scanning...");
 
     if (m_scanThread.joinable()) {
         m_scanThread.join();
     }
 
-    // Spawn the background scanner thread
     m_scanThread = std::thread(&AppBackend::runScannerTask, this);
 }
 
-void AppBackend::cancelScan() {
-    m_cancelRequested = true;
-}
-
 void AppBackend::runScannerTask() {
-    // 1. Use your existing Scanner class
-    std::string dirpath = m_currentFolder.toStdString();
-    auto files = Scanner::scanFiles(dirpath);
-    const int totalFiles = static_cast<int>(files.size());
-    
-    setTotalFiles(totalFiles);
-
-    if (totalFiles == 0) {
-        setStatusText("No images found.");
-        m_isScanning = false;
-        return;
-    }
-
-    // 2. Thread Pool Setup (Exactly like your main.cpp)
     std::atomic<size_t> fileIndex{0};
     const unsigned int numThreads = std::thread::hardware_concurrency();
     const unsigned int threadsToUse = (numThreads > 1) ? numThreads - 2 : 1;
     std::vector<std::thread> workers;
 
     for (unsigned int i = 0; i < threadsToUse; ++i) {
-        workers.emplace_back([this, &files, &fileIndex, totalFiles]() {
-            
-            // Each thread gets its own pipeline instance
+        workers.emplace_back([this, &fileIndex]() {
             PipelineRunner runner = createPipeline();
-            
-            // Dummy settings for now. In the future, we will pass these from QML.
             AppSettings settings; 
 
             while (!m_cancelRequested) {
                 size_t idx = fileIndex.fetch_add(1, std::memory_order_relaxed);
-                if (idx >= files.size()) break;
+                if (idx >= m_files.size()) break;
 
-                const std::string& file = files[idx];
+                const std::string& file = m_files[idx];
 
-                // Setup Context
                 ProcessingContext ctx;
                 ctx.rawFilePath = file;
                 ctx.settings = settings;
@@ -131,25 +117,18 @@ void AppBackend::runScannerTask() {
 #endif
                 ctx.cacheDir = ctx.filePath.parent_path() / ".laplacian_cache";
 
-                // Run real pipeline
                 ProcessingResult result = runner.run(ctx);
 
                 if (result.success) {
-                    // Extract metadata
                     int w = 0, h = 0;
                     ImageIO::readOriginalSize(file, w, h);
-                    QString fileName = QFileInfo(QString::fromStdString(file)).fileName();
-                    
-                    // You can add aestheticScore to ProcessingResult later, using a dummy 0.0f for now
                     float aestheticScore = 0.0f; 
-
-                    // Emit to GUI thread
-                    QString absolutePath = QString::fromStdString(file);
-                    emit fileProcessed(fileName, absolutePath, result.isBlurry, aestheticScore, w, h);
+                    
+                    // EMIT RESULT WITH INDEX SO QML KNOWS WHICH CELL TO UPDATE
+                    emit fileProcessed(static_cast<int>(idx), result.isBlurry, aestheticScore, w, h);
                 }
 
-                // Update Progress (every 5 files to reduce signal flood, exactly like GTK)
-                if (idx % 5 == 0 || idx == files.size() - 1) {
+                if (idx % 5 == 0 || idx == m_files.size() - 1) {
                     QMetaObject::invokeMethod(this, [this, idx]() {
                         setProgress(static_cast<int>(idx + 1));
                     }, Qt::QueuedConnection);
@@ -158,16 +137,17 @@ void AppBackend::runScannerTask() {
         });
     }
 
-    // Wait for all workers to finish
     for (auto& worker : workers) {
-        if (worker.joinable()) {
-            worker.join();
-        }
+        if (worker.joinable()) worker.join();
     }
 
     m_isScanning = false;
     setStatusText(m_cancelRequested ? "Cancelled" : "Finished");
     emit scanFinished();
+}
+
+void AppBackend::cancelScan() {
+    m_cancelRequested = true;
 }
 
 // --- Properties getters/setters ---

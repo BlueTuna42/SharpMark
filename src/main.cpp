@@ -19,7 +19,7 @@
 #include "pipeline/runner.h"
 #include "gui/utils/path_utils.h"
 #include "img_tools/bmp.h"
-#include "img_tools/thumbnail_provider.h"
+#include "qt_gui/thumbnail_provider.h"
 
 #include "loaders/bmp_loader.h"
 #include "processors/laplacian_focus.h"
