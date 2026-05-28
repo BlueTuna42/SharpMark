@@ -3,6 +3,11 @@
 #include <QFileInfo>
 #include <filesystem>
 #include <chrono>
+#include <QStandardPaths>
+#include <QCoreApplication>
+#include <QDir>
+#include <fstream>
+#include <sstream>
 
 #include "tools/scan.h"
 #include "pipeline/interfaces.h"
@@ -39,6 +44,7 @@ PipelineRunner createPipeline() {
 
 AppBackend::AppBackend(QObject *parent) : QObject(parent) {
     m_statusText = "Ready";
+    loadSettings();
 }
 
 AppBackend::~AppBackend() {
@@ -46,7 +52,70 @@ AppBackend::~AppBackend() {
     if (m_scanThread.joinable()) {
         m_scanThread.join();
     }
+    saveSettings();
 }
+
+QString AppBackend::getSettingsFilePath() const {
+#ifdef Q_OS_WIN
+    // Portable Windows mode: save next to the executable
+    return QCoreApplication::applicationDirPath() + "/settings.conf";
+#else
+    // Linux/macOS mode: save in user's config directory
+    QString configDir = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation) + "/SharpMark";
+    QDir dir;
+    if (!dir.exists(configDir)) {
+        dir.mkpath(configDir);
+    }
+    return configDir + "/settings.conf";
+#endif
+}
+
+void AppBackend::loadSettings() {
+    std::ifstream in(getSettingsFilePath().toStdString());
+    if (!in.is_open()) return;
+
+    std::string line;
+    while (std::getline(in, line)) {
+        std::istringstream iss(line);
+        std::string key;
+        if (std::getline(iss, key, '=')) {
+            std::string value;
+            if (std::getline(iss, value)) {
+                if (key == "themeMode") m_themeMode = std::stoi(value);
+                else if (key == "writeExif") m_writeExif = (value == "1");
+                else if (key == "cacheLaplacian") m_cacheLaplacian = (value == "1");
+                else if (key == "rawViewMode") m_rawViewMode = std::stoi(value);
+                else if (key == "rawAnalysisMode") m_rawAnalysisMode = std::stoi(value);
+            }
+        }
+    }
+}
+
+void AppBackend::saveSettings() {
+    std::ofstream out(getSettingsFilePath().toStdString());
+    if (!out.is_open()) return;
+
+    out << "themeMode=" << m_themeMode << "\n";
+    out << "writeExif=" << (m_writeExif ? 1 : 0) << "\n";
+    out << "cacheLaplacian=" << (m_cacheLaplacian ? 1 : 0) << "\n";
+    out << "rawViewMode=" << m_rawViewMode << "\n";
+    out << "rawAnalysisMode=" << m_rawAnalysisMode << "\n";
+}
+
+int AppBackend::themeMode() const { return m_themeMode; }
+void AppBackend::setThemeMode(int mode) { if (m_themeMode != mode) { m_themeMode = mode; saveSettings(); emit themeModeChanged(); } }
+
+bool AppBackend::writeExif() const { return m_writeExif; }
+void AppBackend::setWriteExif(bool write) { if (m_writeExif != write) { m_writeExif = write; saveSettings(); emit writeExifChanged(); } }
+
+bool AppBackend::cacheLaplacian() const { return m_cacheLaplacian; }
+void AppBackend::setCacheLaplacian(bool cache) { if (m_cacheLaplacian != cache) { m_cacheLaplacian = cache; saveSettings(); emit cacheLaplacianChanged(); } }
+
+int AppBackend::rawViewMode() const { return m_rawViewMode; }
+void AppBackend::setRawViewMode(int mode) { if (m_rawViewMode != mode) { m_rawViewMode = mode; saveSettings(); emit rawViewModeChanged(); } }
+
+int AppBackend::rawAnalysisMode() const { return m_rawAnalysisMode; }
+void AppBackend::setRawAnalysisMode(int mode) { if (m_rawAnalysisMode != mode) { m_rawAnalysisMode = mode; saveSettings(); emit rawAnalysisModeChanged(); } }
 
 void AppBackend::selectFolder(const QString &folderPath) {
     if (m_isScanning) return;
