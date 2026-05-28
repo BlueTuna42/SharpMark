@@ -20,6 +20,7 @@
 #include "gui/utils/path_utils.h"
 #include "img_tools/bmp.h"
 #include "qt_gui/thumbnail_provider.h"
+#include "qt_gui/full_image_provider.h"
 
 #include "loaders/bmp_loader.h"
 #include "processors/laplacian_focus.h"
@@ -29,6 +30,12 @@
 #include "postprocessors/xmp_rating.h"
 #include "postprocessors/state_cache.h"
 
+void customMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg) {
+    QFile outFile("sharpmark_debug.log");
+    outFile.open(QIODevice::WriteOnly | QIODevice::Append);
+    QTextStream ts(&outFile);
+    ts << QDateTime::currentDateTime().toString("hh:mm:ss.zzz ") << msg << "\n";
+}
 
 class FocusCheckerApp {
 private:
@@ -190,6 +197,7 @@ public:
 #include "app_backend.h"
 
 int main(int argc, char *argv[]) {
+    //qInstallMessageHandler(customMessageHandler); 
     // Required for High DPI displays
     QGuiApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
     
@@ -206,8 +214,9 @@ int main(int argc, char *argv[]) {
     // Expose the backend object to QML under the name "backend"
     engine.rootContext()->setContextProperty("backend", &backend);
 
-     // Register custom image provider
+    // Register custom image provider
     engine.addImageProvider(QLatin1String("preview"), new ThumbnailProvider);
+    engine.addImageProvider(QLatin1String("full"), new FullImageProvider(&backend));
     // Load the main QML file
     const QUrl url(u"qrc:/SharpMark/qml/main.qml"_qs);
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreated,

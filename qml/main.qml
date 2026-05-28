@@ -10,8 +10,6 @@ Window {
     visible: true
     title: "SharpMark"
     
-    // --- Dynamic Color Palette ---
-    // themeMode: 0 = System (defaults to Dark here), 1 = Light, 2 = Dark
     property bool isLight: backend.themeMode === 1
     
     color: isLight ? "#f5f5f5" : "#1e1e1e"
@@ -19,7 +17,6 @@ Window {
     property color popupBg: isLight ? "#ffffff" : "#2d2d2d"
     property color popupBorder: isLight ? "#cccccc" : "#555555"
     
-    // Card Colors
     property color cardWaitingBg: isLight ? "#ffffff" : "#2a2a2a"
     property color cardWaitingBorder: isLight ? "#cccccc" : "#444444"
     property color cardWaitingText: isLight ? "#666666" : "#aaaaaa"
@@ -55,7 +52,6 @@ Window {
         onAccepted: { resultsModel.clear(); backend.selectFolder(folderDialog.selectedFolder) }
     }
 
-    // --- Settings Popup ---
     Popup {
         id: settingsPopup
         x: Math.round((parent.width - width) / 2)
@@ -118,6 +114,159 @@ Window {
             Button { text: "Close"; Layout.alignment: Qt.AlignHCenter; onClicked: settingsPopup.close() }
         }
     }
+    
+    MessageDialog {
+        id: trashConfirmDialog
+        title: "Move to Trash"
+        text: "Are you sure you want to move this photo to the system Trash?"
+        buttons: MessageDialog.Yes | MessageDialog.No
+        
+        property int targetIndex: -1
+
+        onButtonClicked: function(button, role) {
+            if (button === MessageDialog.Yes && targetIndex !== -1) {
+                let file = resultsModel.get(targetIndex).filePath;
+                if (backend.trashFile(file)) {
+                    resultsModel.remove(targetIndex);
+                    
+                    if (resultsModel.count === 0) {
+                        viewerWindow.close();
+                    } else {
+                        // Keep index within bounds after deletion
+                        if (targetIndex >= resultsModel.count) {
+                            viewerWindow.currentIndex = resultsModel.count - 1;
+                        } else {
+                            // Force UI refresh for the same index
+                            let temp = targetIndex;
+                            viewerWindow.currentIndex = -1;
+                            viewerWindow.currentIndex = temp;
+                        }
+                    }
+                }
+            }
+            targetIndex = -1;
+        }
+    }
+
+    Window {
+        id: viewerWindow
+        width: 1200
+        height: 800
+        title: "Viewer"
+        color: "#050505"
+        visible: false
+
+        property int currentIndex: -1
+
+        onCurrentIndexChanged: {
+            if (currentIndex >= 0 && currentIndex < resultsModel.count) {
+                const file = resultsModel.get(currentIndex).filePath
+                
+                // Reset zoom and pan position when switching images
+                viewerImage.scale = 1.0
+                flickable.contentX = 0
+                flickable.contentY = 0
+                
+                viewerImage.source = ""
+                viewerImage.source = "image://full/" + encodeURIComponent(file)
+                title = "Viewer - " + resultsModel.get(currentIndex).fileName
+            }
+        }
+
+        Flickable {
+            id: flickable
+            anchors.fill: parent
+            contentWidth: viewerImage.width * viewerImage.scale
+            contentHeight: viewerImage.height * viewerImage.scale
+            boundsBehavior: Flickable.StopAtBounds
+            clip: true
+
+            Image {
+                id: viewerImage
+                width: flickable.width
+                height: flickable.height
+                fillMode: Image.PreserveAspectFit
+                asynchronous: true
+                cache: false
+                transformOrigin: Item.TopLeft
+                smooth: true
+                mipmap: true 
+
+                MouseArea {
+                    anchors.fill: parent
+                    // Accept no clicks so Flickable can handle mouse dragging/panning natively
+                    acceptedButtons: Qt.NoButton 
+                    
+                    onWheel: (wheel) => {
+                        let zoomFactor = wheel.angleDelta.y > 0 ? 1.15 : 1 / 1.15;
+                        let oldScale = viewerImage.scale;
+                        
+                        // Clamp zoom between 1x (fit to screen) and 15x
+                        let newScale = Math.max(1.0, Math.min(oldScale * zoomFactor, 15.0));
+                        viewerImage.scale = newScale;
+
+                        // Math to zoom exactly towards the mouse cursor position
+                        let ratio = newScale / oldScale;
+                        flickable.contentX = flickable.contentX * ratio + wheel.x * (ratio - 1);
+                        flickable.contentY = flickable.contentY * ratio + wheel.y * (ratio - 1);
+                    }
+                }
+            }
+        }
+
+        BusyIndicator {
+            anchors.centerIn: parent
+            running: viewerImage.status === Image.Loading
+            width: 64
+            height: 64
+        }
+
+        Text {
+            anchors.centerIn: parent
+            visible: viewerImage.status === Image.Error
+            color: "white"
+            text: "Image load error"
+        }
+
+        RowLayout {
+            anchors.bottom: parent.bottom
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.margins: 30
+            spacing: 20
+
+            Button {
+                text: "<- Previous"
+                onClicked: if (viewerWindow.currentIndex > 0) viewerWindow.currentIndex--
+                enabled: viewerWindow.currentIndex > 0
+            }
+            
+            Button {
+                text: "Trash Photo"
+                icon.name: "user-trash"
+                onClicked: {
+                    trashConfirmDialog.targetIndex = viewerWindow.currentIndex;
+                    trashConfirmDialog.open();
+                }
+            }
+
+            Button {
+                text: "Next ->"
+                onClicked: if (viewerWindow.currentIndex < resultsModel.count - 1) viewerWindow.currentIndex++
+                enabled: viewerWindow.currentIndex < resultsModel.count - 1
+            }
+        }
+
+        Shortcut { sequence: "Left"; onActivated: if (viewerWindow.currentIndex > 0) viewerWindow.currentIndex-- }
+        Shortcut { sequence: "Right"; onActivated: if (viewerWindow.currentIndex < resultsModel.count - 1) viewerWindow.currentIndex++ }
+        Shortcut { sequence: "Escape"; onActivated: viewerWindow.close() }
+        Shortcut { 
+            sequence: "Delete" 
+            onActivated: {
+                trashConfirmDialog.targetIndex = viewerWindow.currentIndex;
+                trashConfirmDialog.open();
+            }
+        }
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -158,7 +307,6 @@ Window {
             Layout.fillWidth: true
             Layout.fillHeight: true
 
-            // GRID VIEW
             GridView {
                 anchors.fill: parent
                 model: resultsModel
@@ -172,6 +320,14 @@ Window {
                     radius: 6
                     border.color: model.status === "WAITING" ? cardWaitingBorder : (model.isBlurry ? cardBlurryBorder : cardSharpBorder)
                     border.width: 1
+
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            viewerWindow.currentIndex = index;
+                            viewerWindow.show();
+                        }
+                    }
 
                     ColumnLayout {
                         anchors.fill: parent
@@ -198,7 +354,6 @@ Window {
                 }
             }
 
-            // LIST VIEW
             ListView {
                 anchors.fill: parent
                 model: resultsModel
@@ -212,6 +367,14 @@ Window {
                     radius: 4
                     border.color: model.status === "WAITING" ? cardWaitingBorder : (model.isBlurry ? cardBlurryBorder : cardSharpBorder)
                     border.width: 1
+
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            viewerWindow.currentIndex = index;
+                            viewerWindow.show();
+                        }
+                    }
 
                     RowLayout {
                         anchors.fill: parent

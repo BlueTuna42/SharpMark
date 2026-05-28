@@ -6,6 +6,7 @@
 #include <QStandardPaths>
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <fstream>
 #include <sstream>
 
@@ -217,6 +218,10 @@ void AppBackend::runScannerTask() {
 
 void AppBackend::cancelScan() {
     m_cancelRequested = true;
+}
+
+bool AppBackend::trashFile(const QString &filePath) {
+    return QFile::moveToTrash(filePath);
 }
 
 // --- Properties getters/setters ---

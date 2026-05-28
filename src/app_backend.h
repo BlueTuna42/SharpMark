@@ -29,6 +29,7 @@ public:
     Q_INVOKABLE void selectFolder(const QString &folderPath);
     Q_INVOKABLE void startScan();
     Q_INVOKABLE void cancelScan();
+    Q_INVOKABLE bool trashFile(const QString &filePath);
 
     QString statusText() const;
     int progress() const;
