@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.16)
 project(SharpMark)
 
 # Define ANSI escape sequences for colored output (works in most terminals)
@@ -17,6 +17,11 @@ endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Enable Qt Auto-Moc, Auto-Uic, and Auto-Rcc
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
+set(CMAKE_AUTOUIC ON)
 
 # Default to Release build for performance (-O2)
 if(NOT CMAKE_BUILD_TYPE)
@@ -38,10 +43,12 @@ endif()
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
+# Find Qt6 Components
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick)
+
 find_package(PkgConfig QUIET)
 if(PKG_CONFIG_FOUND)
     pkg_check_modules(LIBRAW IMPORTED_TARGET libraw)
-    pkg_check_modules(GTK3 IMPORTED_TARGET gtk+-3.0) 
 endif()
 
 if(NOT LIBRAW_FOUND)
@@ -58,32 +65,19 @@ else()
     message(STATUS "${ColorGreen}LibRaw found.${ColorReset}")
 endif()
 
-if(NOT GTK3_FOUND)
-    message(FATAL_ERROR "${ColorRed}${ColorBold}GTK3 not found!${ColorReset}")
-else()
-    message(STATUS "${ColorGreen}GTK3 found.${ColorReset}")
-endif()
+message(STATUS "${ColorGreen}Qt6 found.${ColorReset}")
 
 # Source files
 set(SOURCES
     src/main.cpp
-    src/gui/window/app_style.cpp
+    src/app_backend.cpp
     src/img_tools/laplacian.cpp
     src/img_tools/bmp.cpp
-    src/gui/viewer/image_viewer.cpp
-    src/gui/window/main_window_builder.cpp
-    src/gui/utils/path_utils.cpp
-    src/gui/actions/delete_blurry_action.cpp
-    src/gui/actions/photo_trash.cpp
     src/tools/scan.cpp
     src/tools/XMP_tools.cpp
-    src/gui/viewer/preview_loader.cpp
-    src/gui/results/result_list_view.cpp
-    src/gui/results/result_store.cpp
-    src/gui/status/progress_summary.cpp
-    src/gui/gui.cpp
     src/processors/clip_embedding.cpp
     src/processors/aesthetic_scorer.cpp
+    src/gui/utils/path_utils.cpp
 )
 
 if(WIN32)
@@ -102,14 +96,26 @@ else()
     target_link_libraries(SharpMark PRIVATE ${LIBRAW_LIBRARIES})
 endif()
 
-if(TARGET PkgConfig::GTK3)
-    target_link_libraries(SharpMark PRIVATE PkgConfig::GTK3)
-endif()
+# Link Qt libraries
+target_link_libraries(SharpMark PRIVATE 
+    Qt6::Core 
+    Qt6::Gui 
+    Qt6::Qml 
+    Qt6::Quick
+    Threads::Threads
+)
 
-target_link_libraries(SharpMark PRIVATE Threads::Threads)
 if(UNIX)
     target_link_libraries(SharpMark PRIVATE m)
 endif()
+
+# --- QML Module Setup ---
+qt_add_qml_module(SharpMark
+    URI SharpMark
+    VERSION 1.0
+    QML_FILES
+        qml/main.qml
+)
 
 # --- ONNX Runtime (Local Binaries) ---
 set(ONNXRUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/onnxruntime")
@@ -156,11 +162,6 @@ if(UNIX AND NOT APPLE)
     install(FILES assets/icons/256x256/icon.png 
             DESTINATION share/icons/hicolor/256x256/apps 
             RENAME sharpmark.png)
-            
-    # Uncomment for svg image
-    # install(FILES assets/icons/app_icon.svg 
-    #         DESTINATION share/icons/hicolor/scalable/apps 
-    #         RENAME sharpmark.svg)
 endif()
 
 if(NOT TARGET uninstall)
@@ -179,7 +180,7 @@ if(UNIX AND NOT APPLE)
     
     # Debian package names are typically lowercase
     set(CPACK_PACKAGE_NAME "sharpmark") 
-    set(CPACK_PACKAGE_VERSION "1.1.0")
+    set(CPACK_PACKAGE_VERSION "2.0.0-alpha.1")
     
     # Required field for .deb packages (maintainer info)
     set(CPACK_PACKAGE_CONTACT "BlueTuna <azimuthsouth5@gmail.com>") 

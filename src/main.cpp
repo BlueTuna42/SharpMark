@@ -19,6 +19,7 @@
 #include "pipeline/runner.h"
 #include "gui/utils/path_utils.h"
 #include "img_tools/bmp.h"
+#include "img_tools/thumbnail_provider.h"
 
 #include "loaders/bmp_loader.h"
 #include "processors/laplacian_focus.h"
@@ -183,24 +184,39 @@ public:
     }
 };
 
-int main(int argc, char** argv) {
-    std::string dirpath;
-    VisualGUI gui;
-    FocusCheckerApp app;
+#include <QGuiApplication>
+#include <QQmlApplicationEngine>
+#include <QQmlContext>
+#include "app_backend.h"
 
-    if (argc > 1) {
-        dirpath = argv[1];
-        if (!dirpath.empty()) {
-            app.processDirectory(dirpath, gui);
-        }
-    }
+int main(int argc, char *argv[]) {
+    // Required for High DPI displays
+    QGuiApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
+    
+    QGuiApplication app(argc, argv);
+    app.setOrganizationName("SharpMark");
+    app.setOrganizationDomain("sharpmark.local");
+    app.setApplicationName("SharpMark");
 
-    while (!gui.IsClosed()) {
-        dirpath = gui.SelectDirectory();
-        if (!dirpath.empty()) {
-            app.processDirectory(dirpath, gui);
-        }
-    }
+    // Instantiate our C++ backend
+    AppBackend backend;
 
-    return 0;
+    QQmlApplicationEngine engine;
+    
+    // Expose the backend object to QML under the name "backend"
+    engine.rootContext()->setContextProperty("backend", &backend);
+
+     // Register custom image provider
+    engine.addImageProvider(QLatin1String("preview"), new ThumbnailProvider);
+    // Load the main QML file
+    const QUrl url(u"qrc:/SharpMark/qml/main.qml"_qs);
+    QObject::connect(&engine, &QQmlApplicationEngine::objectCreated,
+        &app, [url](QObject *obj, const QUrl &objUrl) {
+            if (!obj && url == objUrl)
+                QCoreApplication::exit(-1);
+        }, Qt::QueuedConnection);
+        
+    engine.load(url);
+
+    return app.exec(); // Start the Qt event loop
 }
