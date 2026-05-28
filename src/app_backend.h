@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QObject>
+#include <QImage>
 #include <QString>
 #include <QVariantList>
 #include <atomic>
@@ -21,6 +22,7 @@ class AppBackend : public QObject {
     Q_PROPERTY(bool cacheLaplacian READ cacheLaplacian WRITE setCacheLaplacian NOTIFY cacheLaplacianChanged)
     Q_PROPERTY(int rawViewMode READ rawViewMode WRITE setRawViewMode NOTIFY rawViewModeChanged)
     Q_PROPERTY(int rawAnalysisMode READ rawAnalysisMode WRITE setRawAnalysisMode NOTIFY rawAnalysisModeChanged)
+    Q_PROPERTY(QString histogramBase64 READ histogramBase64 NOTIFY histogramUpdated)
 
 public:
     explicit AppBackend(QObject *parent = nullptr);
@@ -30,6 +32,10 @@ public:
     Q_INVOKABLE void startScan();
     Q_INVOKABLE void cancelScan();
     Q_INVOKABLE bool trashFile(const QString &filePath);
+    Q_INVOKABLE QVariantMap getPhotoMetadata(const QString& filePath);
+
+    void updateHistogramFromImage(const QImage& image);
+    QString histogramBase64() const { return m_histogramBase64; }
 
     QString statusText() const;
     int progress() const;
@@ -66,6 +72,8 @@ signals:
     void fileProcessed(int index, bool isBlurry, float aestheticScore, int width, int height);
     void scanFinished();
 
+    void histogramUpdated();
+
 private:
     QString m_statusText;
     int m_progress = 0;
@@ -93,4 +101,6 @@ private:
     void loadSettings();
     void saveSettings();
     QString getSettingsFilePath() const;
+
+    QString m_histogramBase64;
 };

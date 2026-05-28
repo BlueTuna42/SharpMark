@@ -157,12 +157,13 @@ Window {
         visible: false
 
         property int currentIndex: -1
+        property string exifInfo: ""
+        property bool sidebarVisible: true
 
         onCurrentIndexChanged: {
             if (currentIndex >= 0 && currentIndex < resultsModel.count) {
                 const file = resultsModel.get(currentIndex).filePath
                 
-                // Reset zoom and pan position when switching images
                 viewerImage.scale = 1.0
                 flickable.contentX = 0
                 flickable.contentY = 0
@@ -170,90 +171,173 @@ Window {
                 viewerImage.source = ""
                 viewerImage.source = "image://full/" + encodeURIComponent(file)
                 title = "Viewer - " + resultsModel.get(currentIndex).fileName
+                
+                // Fetch EXIF metadata from C++
+                let meta = backend.getPhotoMetadata(encodeURIComponent(file));
+                exifInfo = meta.infoText;
             }
         }
 
-        Flickable {
-            id: flickable
+        RowLayout {
             anchors.fill: parent
-            contentWidth: viewerImage.width * viewerImage.scale
-            contentHeight: viewerImage.height * viewerImage.scale
-            boundsBehavior: Flickable.StopAtBounds
-            clip: true
+            spacing: 0
 
-            Image {
-                id: viewerImage
-                width: flickable.width
-                height: flickable.height
-                fillMode: Image.PreserveAspectFit
-                asynchronous: true
-                cache: false
-                transformOrigin: Item.TopLeft
-                smooth: true
-                mipmap: true 
+            // Left side: The Image Viewer
+            Item {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
 
-                MouseArea {
+                Flickable {
+                    id: flickable
                     anchors.fill: parent
-                    // Accept no clicks so Flickable can handle mouse dragging/panning natively
-                    acceptedButtons: Qt.NoButton 
-                    
-                    onWheel: (wheel) => {
-                        let zoomFactor = wheel.angleDelta.y > 0 ? 1.15 : 1 / 1.15;
-                        let oldScale = viewerImage.scale;
-                        
-                        // Clamp zoom between 1x (fit to screen) and 15x
-                        let newScale = Math.max(1.0, Math.min(oldScale * zoomFactor, 15.0));
-                        viewerImage.scale = newScale;
+                    contentWidth: viewerImage.width * viewerImage.scale
+                    contentHeight: viewerImage.height * viewerImage.scale
+                    boundsBehavior: Flickable.StopAtBounds
+                    clip: true
 
-                        // Math to zoom exactly towards the mouse cursor position
-                        let ratio = newScale / oldScale;
-                        flickable.contentX = flickable.contentX * ratio + wheel.x * (ratio - 1);
-                        flickable.contentY = flickable.contentY * ratio + wheel.y * (ratio - 1);
+                    Image {
+                        id: viewerImage
+                        width: flickable.width
+                        height: flickable.height
+                        fillMode: Image.PreserveAspectFit
+                        asynchronous: true
+                        cache: false
+                        transformOrigin: Item.TopLeft
+                        smooth: true
+                        mipmap: true 
+
+                        MouseArea {
+                            anchors.fill: parent
+                            acceptedButtons: Qt.NoButton 
+                            
+                            onWheel: (wheel) => {
+                                let zoomFactor = wheel.angleDelta.y > 0 ? 1.15 : 1 / 1.15;
+                                let oldScale = viewerImage.scale;
+                                let newScale = Math.max(1.0, Math.min(oldScale * zoomFactor, 15.0));
+                                viewerImage.scale = newScale;
+                                let ratio = newScale / oldScale;
+                                flickable.contentX = flickable.contentX * ratio + wheel.x * (ratio - 1);
+                                flickable.contentY = flickable.contentY * ratio + wheel.y * (ratio - 1);
+                            }
+                        }
+                    }
+                }
+
+                BusyIndicator {
+                    anchors.centerIn: parent
+                    running: viewerImage.status === Image.Loading
+                    width: 64
+                    height: 64
+                }
+
+                // Bottom Navigation Bar overlay
+                RowLayout {
+                    anchors.bottom: parent.bottom
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.margins: 30
+                    spacing: 20
+
+                    Button {
+                        text: "<- Previous"
+                        onClicked: if (viewerWindow.currentIndex > 0) viewerWindow.currentIndex--
+                        enabled: viewerWindow.currentIndex > 0
+                    }
+                    
+                    Button {
+                        text: "Trash Photo"
+                        icon.name: "user-trash"
+                        onClicked: {
+                            trashConfirmDialog.targetIndex = viewerWindow.currentIndex;
+                            trashConfirmDialog.open();
+                        }
+                    }
+
+                    Button {
+                        text: "Next ->"
+                        onClicked: if (viewerWindow.currentIndex < resultsModel.count - 1) viewerWindow.currentIndex++
+                        enabled: viewerWindow.currentIndex < resultsModel.count - 1
+                    }
+                }
+            }
+
+            // Right side: Metadata Sidebar
+            Rectangle {
+                id: sidebar
+                Layout.preferredWidth: viewerWindow.sidebarVisible ? 300 : 0
+                Layout.fillHeight: true
+                color: "#1a1a1a"
+                clip: true
+                
+                Behavior on Layout.preferredWidth { NumberAnimation { duration: 200; easing.type: Easing.OutQuad } }
+
+                Rectangle {
+                    width: 1
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    color: "#333333"
+                }
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 15
+                    spacing: 15
+                    visible: sidebar.Layout.preferredWidth > 100 // Hide content during animation
+
+                    Text {
+                        text: "Metadata & Analysis"
+                        color: "white"
+                        font.bold: true
+                        font.pixelSize: 16
+                        Layout.fillWidth: true
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 150
+                        color: "#252525"
+                        border.color: "#444"
+                        radius: 4
+                        clip: true
+
+                        Image {
+                            id: histogramImage
+                            anchors.fill: parent
+                            fillMode: Image.PreserveAspectFit
+                            source: backend.histogramBase64 !== "" ? backend.histogramBase64 : ""
+                            
+                            Text {
+                                anchors.centerIn: parent
+                                text: "Loading histogram..."
+                                color: "#888"
+                                visible: backend.histogramBase64 === ""
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: viewerWindow.exifInfo
+                        color: "#dddddd"
+                        font.pixelSize: 14
+                        lineHeight: 1.4
+                        textFormat: Text.RichText
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        wrapMode: Text.WordWrap
+                        verticalAlignment: Text.AlignTop
                     }
                 }
             }
         }
 
-        BusyIndicator {
-            anchors.centerIn: parent
-            running: viewerImage.status === Image.Loading
-            width: 64
-            height: 64
-        }
-
-        Text {
-            anchors.centerIn: parent
-            visible: viewerImage.status === Image.Error
-            color: "white"
-            text: "Image load error"
-        }
-
-        RowLayout {
-            anchors.bottom: parent.bottom
-            anchors.horizontalCenter: parent.horizontalCenter
-            anchors.margins: 30
-            spacing: 20
-
-            Button {
-                text: "<- Previous"
-                onClicked: if (viewerWindow.currentIndex > 0) viewerWindow.currentIndex--
-                enabled: viewerWindow.currentIndex > 0
-            }
-            
-            Button {
-                text: "Trash Photo"
-                icon.name: "user-trash"
-                onClicked: {
-                    trashConfirmDialog.targetIndex = viewerWindow.currentIndex;
-                    trashConfirmDialog.open();
-                }
-            }
-
-            Button {
-                text: "Next ->"
-                onClicked: if (viewerWindow.currentIndex < resultsModel.count - 1) viewerWindow.currentIndex++
-                enabled: viewerWindow.currentIndex < resultsModel.count - 1
-            }
+        // Toggle Sidebar Button (Top Right)
+        Button {
+            anchors.top: parent.top
+            anchors.right: parent.right
+            anchors.margins: 15
+            text: viewerWindow.sidebarVisible ? "▶" : "◀"
+            width: 40
+            onClicked: viewerWindow.sidebarVisible = !viewerWindow.sidebarVisible
         }
 
         Shortcut { sequence: "Left"; onActivated: if (viewerWindow.currentIndex > 0) viewerWindow.currentIndex-- }

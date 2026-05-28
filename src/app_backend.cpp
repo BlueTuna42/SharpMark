@@ -7,8 +7,20 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QBuffer>
 #include <fstream>
+#include <libraw/libraw.h>
+#include <QVariantMap>
+#include <iomanip>
 #include <sstream>
+#include <QUrl>
+#include <QImageReader>
+#include <QImageIOHandler>
+#include <QPainter>
+#include <QPainterPath>
+#include <QBuffer>
+#include <QFile>
+#include <QTextStream>
 
 #include "tools/scan.h"
 #include "pipeline/interfaces.h"
@@ -54,6 +66,202 @@ AppBackend::~AppBackend() {
         m_scanThread.join();
     }
     saveSettings();
+}
+
+QVariantMap AppBackend::getPhotoMetadata(const QString& rawPath) {
+    QVariantMap result;
+    
+    // 1. Properly decode the URI component path from QML
+    QString cleanPath = QUrl::fromPercentEncoding(rawPath.toUtf8());
+    
+#ifdef Q_OS_WIN
+    if (cleanPath.startsWith("file:///")) cleanPath = cleanPath.mid(8);
+    else if (cleanPath.startsWith('/')) cleanPath = cleanPath.mid(1);
+#else
+    if (cleanPath.startsWith("file://")) cleanPath = cleanPath.mid(7);
+#endif
+
+    QFileInfo fileInfo(cleanPath);
+    if (!fileInfo.exists()) {
+        result["infoText"] = "File not found: " + cleanPath;
+        return result;
+    }
+
+    std::ostringstream ss;
+    bool foundData = false;
+
+    // 2. Fast Path: Use Qt's built-in image reader for standard formats (JPG, PNG)
+    QImageReader reader(cleanPath);
+    QSize imgSize = reader.size();
+    
+    if (imgSize.isValid()) {
+        QString make = reader.text("Make");
+        if (make.isEmpty()) make = reader.text("exif:Make");
+        
+        QString model = reader.text("Model");
+        if (model.isEmpty()) model = reader.text("exif:Model");
+        
+        QString date = reader.text("DateTime");
+        if (date.isEmpty()) date = reader.text("exif:DateTimeOriginal");
+        
+        QString camera = (make + " " + model).trimmed();
+        
+        if (!camera.isEmpty()) ss << "<b>Camera:</b> " << camera.toStdString() << "<br>";
+        if (!date.isEmpty()) ss << "<b>Date:</b> " << date.toStdString() << "<br><br>";
+        
+        ss << "<b>Resolution:</b> " << imgSize.width() << " x " << imgSize.height() << "px<br>";
+        ss << "<b>File Size:</b> " << std::fixed << std::setprecision(2) << (fileInfo.size() / 1024.0 / 1024.0) << " MB";
+        
+        foundData = true;
+    }
+
+    // 3. Deep Path: Use LibRaw for professional formats (RAW)
+    if (!foundData) {
+        LibRaw lr;
+        int ret = LIBRAW_SUCCESS;
+        
+#if defined(_WIN32)
+        ret = lr.open_file(cleanPath.toStdWString().c_str());
+        if (ret != LIBRAW_SUCCESS) {
+            ret = lr.open_file(cleanPath.toLocal8Bit().constData());
+        }
+#else
+        ret = lr.open_file(cleanPath.toUtf8().constData());
+#endif
+
+        if (ret == LIBRAW_SUCCESS) {
+            if (strlen(lr.imgdata.idata.make) > 0 || strlen(lr.imgdata.idata.model) > 0) {
+                ss << "<b>Camera:</b> " << lr.imgdata.idata.make << " " << lr.imgdata.idata.model << "<br>";
+            }
+            if (strlen(lr.imgdata.lens.Lens) > 0) {
+                ss << "<b>Lens:</b> " << lr.imgdata.lens.Lens << "<br>";
+            }
+            if (lr.imgdata.other.timestamp > 0) {
+                ss << "<b>Date:</b> " << std::put_time(std::localtime(&lr.imgdata.other.timestamp), "%Y-%m-%d %H:%M:%S") << "<br><br>";
+            }
+            if (lr.imgdata.other.aperture > 0.0f) {
+                ss << "<b>Aperture:</b> f/" << lr.imgdata.other.aperture << "<br>";
+            }
+            if (lr.imgdata.other.shutter > 0.0f) {
+                ss << "<b>Shutter:</b> 1/" << (int)(1.0f / lr.imgdata.other.shutter) << "s<br>";
+            }
+            if (lr.imgdata.other.iso_speed > 0.0f) {
+                ss << "<b>ISO:</b> " << lr.imgdata.other.iso_speed << "<br>";
+            }
+            if (lr.imgdata.other.focal_len > 0.0f) {
+                ss << "<b>Focal Length:</b> " << lr.imgdata.other.focal_len << "mm<br>";
+            }
+            
+            ss << "<br><b>Resolution:</b> " << lr.imgdata.sizes.width << " x " << lr.imgdata.sizes.height << "px<br>";
+            ss << "<b>File Size:</b> " << std::fixed << std::setprecision(2) << (fileInfo.size() / 1024.0 / 1024.0) << " MB";
+            
+            foundData = true;
+        }
+        lr.recycle();
+    }
+
+    // 4. Analysis Data: Read from .laplacian_cache/state.csv
+    QFile csvFile(fileInfo.absolutePath() + "/.laplacian_cache/state.csv");
+    if (csvFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QTextStream in(&csvFile);
+        QString targetPath = fileInfo.absoluteFilePath();
+        
+        while (!in.atEnd()) {
+            QString line = in.readLine();
+            QStringList parts = line.split(',');
+            // CSV format: filePath, isBlurry, variance
+            if (parts.size() >= 3) {
+                if (QFileInfo(parts[0]).absoluteFilePath() == targetPath || parts[0] == cleanPath) {
+                    bool isBlurry = (parts[1] == "1" || parts[1].toLower() == "true");
+                    double variance = parts[2].toDouble();
+                    
+                    ss << "<br><br><span style='color:#aaaaaa'>— Analysis —</span><br>";
+                    ss << "<b>Status:</b> <span style='color:" << (isBlurry ? "#ff5555" : "#55ff55") << "'>" 
+                       << (isBlurry ? "Blurry" : "Sharp") << "</span><br>";
+                    ss << "<b>Focus Score:</b> " << std::fixed << std::setprecision(2) << variance;
+                    
+                    foundData = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (foundData) {
+        result["infoText"] = QString::fromStdString(ss.str());
+    } else {
+        result["infoText"] = "No EXIF or Analysis data available";
+    }
+    
+    return result;
+}
+
+void AppBackend::updateHistogramFromImage(const QImage& src) {
+    if (src.isNull()) {
+        m_histogramBase64 = "";
+        emit histogramUpdated();
+        return;
+    }
+
+    int w = 300;
+    int h = 150;
+    QImage histImg(w, h, QImage::Format_ARGB32);
+    histImg.fill(QColor(0x25, 0x25, 0x25, 255));
+
+    int hist_r[256] = {0}, hist_g[256] = {0}, hist_b[256] = {0}, hist_l[256] = {0};
+    int max_count = 0;
+    const int step = 4;
+
+    for (int y = 0; y < src.height(); y += step) {
+        const QRgb* row = reinterpret_cast<const QRgb*>(src.constScanLine(y));
+        for (int x = 0; x < src.width(); x += step) {
+            QRgb pixel = row[x];
+            int r = qRed(pixel);
+            int g = qGreen(pixel);
+            int b = qBlue(pixel);
+            int luma = (r * 299 + g * 587 + b * 114) / 1000;
+
+            hist_r[r]++;
+            hist_g[g]++;
+            hist_b[b]++;
+            hist_l[luma]++;
+
+            if (hist_l[luma] > max_count) max_count = hist_l[luma];
+        }
+    }
+
+    if (max_count > 0) {
+        QPainter p(&histImg);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setCompositionMode(QPainter::CompositionMode_Plus);
+
+        auto drawChannel = [&](int* hist, QColor color) {
+            QPainterPath path;
+            path.moveTo(0, h);
+            for (int i = 0; i < 256; ++i) {
+                double x = (i / 255.0) * w;
+                double val = std::pow((double)hist[i] / max_count, 0.5); 
+                double y = h - (val * h * 0.95);
+                path.lineTo(x, y);
+            }
+            path.lineTo(w, h);
+            path.closeSubpath();
+            p.fillPath(path, color);
+        };
+
+        drawChannel(hist_r, QColor(255, 0, 0, 150));
+        drawChannel(hist_g, QColor(0, 255, 0, 150));
+        drawChannel(hist_b, QColor(0, 0, 255, 150));
+        p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+        drawChannel(hist_l, QColor(255, 255, 255, 60));
+    }
+
+    QByteArray ba;
+    QBuffer buffer(&ba);
+    buffer.open(QIODevice::WriteOnly);
+    histImg.save(&buffer, "PNG");
+    m_histogramBase64 = "data:image/png;base64," + QString(ba.toBase64());
+    emit histogramUpdated();
 }
 
 QString AppBackend::getSettingsFilePath() const {

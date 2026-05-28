@@ -84,6 +84,8 @@ public:
         }
         
         qDebug() << "======================================";
+
+        m_backend->updateHistogramFromImage(image);
         return image;
     }
 
