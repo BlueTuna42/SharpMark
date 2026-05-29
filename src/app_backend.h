@@ -33,6 +33,7 @@ public:
 
     explicit PipelineConfigModel(QObject *parent = nullptr) : QAbstractListModel(parent) {
         // Initialize with default tools
+        m_steps.push_back({"exposure", "Exposure Check", true});
         m_steps.push_back({"laplacian", "Laplacian Focus Check", true});
         m_steps.push_back({"ai_aesthetic", "AI Aesthetic Scorer", true});
     }
@@ -183,7 +184,7 @@ signals:
     void rawAnalysisModeChanged();
     
     void fileFound(const QString &fileName, const QString &filePath, int index);
-    void fileProcessed(int index, bool isBlurry, float aestheticScore, int width, int height);
+    void fileProcessed(int index, bool isRejected, QString rejectReason, float aestheticScore, int width, int height);
     void scanFinished();
 
     void histogramUpdated();

@@ -80,15 +80,23 @@ Window {
     Connections {
         target: backend
         function onFileFound(fileName, filePath, index) {
-            resultsModel.append({ "fileName": fileName, "filePath": filePath, "isBlurry": false, "score": "0.00", "status": "WAITING" })
+        resultsModel.append({
+            fileName: fileName,
+            filePath: filePath,
+            isRejected: false, 
+            rejectReason: "",
+            score: "0.00",
+            status: "WAITING"
+        })
+    }
+        function onFileProcessed(index, isRejected, rejectReason, aestheticScore, width, height) {
+        if (index >= 0 && index < resultsModel.count) {
+            resultsModel.setProperty(index, "isRejected", isRejected)
+            resultsModel.setProperty(index, "rejectReason", rejectReason)
+            resultsModel.setProperty(index, "score", aestheticScore.toFixed(2))
+            resultsModel.setProperty(index, "status", isRejected ? "REJECTED" : "ACCEPTED")
         }
-        function onFileProcessed(index, isBlurry, aestheticScore, width, height) {
-            if (index >= 0 && index < resultsModel.count) {
-                resultsModel.setProperty(index, "isBlurry", isBlurry)
-                resultsModel.setProperty(index, "score", aestheticScore.toFixed(2))
-                resultsModel.setProperty(index, "status", isBlurry ? "BLURRY" : "SHARP")
-            }
-        }
+    }
     }
 
     FolderDialog {
@@ -635,11 +643,21 @@ Window {
                     cellWidth: 220; cellHeight: 260
                     visible: isGridView
 
+                    ScrollBar.vertical: ScrollBar {
+                        active: true
+                        policy: ScrollBar.AsNeeded
+                        contentItem: Rectangle {
+                        implicitWidth: 8
+                        radius: 4
+                        color: isLight ? "#999999" : "#666666"
+                    }
+            }
+
                     delegate: Rectangle {
                         width: 200; height: 240
-                        color: model.status === "WAITING" ? cardWaitingBg : (model.isBlurry ? cardBlurryBg : cardSharpBg)
+                        color: model.status === "WAITING" ? cardWaitingBg : (model.isRejected ? cardBlurryBg : cardSharpBg)
                         radius: 6
-                        border.color: model.status === "WAITING" ? cardWaitingBorder : (model.isBlurry ? cardBlurryBorder : cardSharpBorder)
+                        border.color: model.status === "WAITING" ? cardWaitingBorder : (model.isRejected ? cardBlurryBorder : cardSharpBorder)
                         border.width: 1
 
                         MouseArea {
@@ -666,10 +684,15 @@ Window {
 
                             Text { text: model.fileName; color: textColor; font.pixelSize: 12; Layout.fillWidth: true; elide: Text.ElideRight }
 
-                            Text { 
-                                text: model.status === "WAITING" ? "Waiting..." : (model.status + " (" + model.score + ")")
-                                color: model.status === "WAITING" ? cardWaitingText : (model.isBlurry ? cardBlurryText : cardSharpText)
-                                font.bold: true; font.pixelSize: 12
+                            Text {
+                                text: {
+                                    if (model.status === "WAITING") return "Waiting...";
+                                    if (model.isRejected) return "Rejected: " + model.rejectReason;
+                                    return "Score: " + model.score;
+                                }
+                                color: model.status === "WAITING" ? cardWaitingText : (model.isRejected ? cardBlurryText : cardSharpText)
+                                font.bold: true
+                                font.pixelSize: 12
                             }
                         }
                     }
@@ -681,6 +704,16 @@ Window {
                     clip: true
                     spacing: 4
                     visible: !isGridView
+
+                    ScrollBar.vertical: ScrollBar {
+                        active: true
+                        policy: ScrollBar.AsNeeded
+                        contentItem: Rectangle {
+                        implicitWidth: 8
+                        radius: 4
+                        color: isLight ? "#999999" : "#666666"
+                    }
+            }
 
                     delegate: Rectangle {
                         width: ListView.view.width; height: 60

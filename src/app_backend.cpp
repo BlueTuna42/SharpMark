@@ -31,6 +31,7 @@
 #include "processors/state_cache.h"
 #include "processors/clip_embedding.h"
 #include "processors/aesthetic_scorer.h"
+#include "processors/exposure_check.h"
 #include "postprocessors/state_cache.h"
 #include "img_tools/bmp.h"
 #include "gui/utils/path_utils.h"
@@ -47,10 +48,11 @@ PipelineRunner AppBackend::createPipeline() {
     for (const auto& step : steps) {
         if (!step.enabled) continue;
 
-        if (step.id == "laplacian") {
+        if (step.id == "exposure") {
+            runner.addProcessor(std::make_unique<ExposureCheckProcessor>());
+        } else if (step.id == "laplacian") {
             runner.addProcessor(std::make_unique<LaplacianFocusProcessor>());
-        } 
-        else if (step.id == "ai_aesthetic") {
+        } else if (step.id == "aiaesthetic") {
             runner.addProcessor(std::make_unique<ClipEmbeddingProcessor>("vision_model_quantized.onnx"));
             std::filesystem::path configDir = get_app_config_dir();
             runner.addProcessor(std::make_unique<AestheticScorer>(configDir));
@@ -521,46 +523,64 @@ QString AppBackend::getSettingsFilePath() const {
 
 void AppBackend::loadSettings() {
     std::ifstream in(getSettingsFilePath().toStdString());
-    if (!in.is_open()) return;
-
-    std::string line;
+    
+    std::vector<QString> loadedIds;
     bool pipelineLoaded = false;
-    while (std::getline(in, line)) {
-        std::istringstream iss(line);
-        std::string key;
-        if (std::getline(iss, key, '=')) {
-            std::string value;
-            if (std::getline(iss, value)) {
-                if (key == "themeMode") m_themeMode = std::stoi(value);
-                else if (key == "writeExif") m_writeExif = (value == "1");
-                else if (key == "cacheLaplacian") m_cacheLaplacian = (value == "1");
-                else if (key == "rawViewMode") m_rawViewMode = std::stoi(value);
-                else if (key == "rawAnalysisMode") m_rawAnalysisMode = std::stoi(value);
-                else if (key == "pipeline") {
-                    m_pipelineModel.clear();
-                    std::istringstream pStream(value);
-                    std::string token;
-                    while (std::getline(pStream, token, ',')) {
-                        size_t colonIdx = token.find(':');
-                        if (colonIdx != std::string::npos) {
-                            QString id = QString::fromStdString(token.substr(0, colonIdx));
-                            bool enabled = (token.substr(colonIdx + 1) == "1");
-                            
-                            // Restore human-readable names based on IDs
-                            QString name = id; 
-                            if (id == "laplacian") name = "Laplacian Focus Check";
-                            if (id == "aiaesthetic") name = "AI Aesthetic Scorer";
-                            
-                            m_pipelineModel.addStep(id, name, enabled);
+
+    if (in.is_open()) {
+        std::string line;
+        while (std::getline(in, line)) {
+            std::istringstream iss(line);
+            std::string key;
+            if (std::getline(iss, key, '=')) {
+                std::string value;
+                if (std::getline(iss, value)) {
+                    if (key == "themeMode") m_themeMode = std::stoi(value);
+                    else if (key == "writeExif") m_writeExif = (value == "1");
+                    else if (key == "cacheLaplacian") m_cacheLaplacian = (value == "1");
+                    else if (key == "rawViewMode") m_rawViewMode = std::stoi(value);
+                    else if (key == "rawAnalysisMode") m_rawAnalysisMode = std::stoi(value);
+                    else if (key == "pipeline") {
+                        m_pipelineModel.clear();
+                        std::istringstream pStream(value);
+                        std::string token;
+                        while (std::getline(pStream, token, ',')) {
+                            size_t colonIdx = token.find(':');
+                            if (colonIdx != std::string::npos) {
+                                QString id = QString::fromStdString(token.substr(0, colonIdx));
+                                bool enabled = (token.substr(colonIdx + 1) == "1");
+                                
+                                QString name = id; 
+                                if (id == "exposure") name = "Exposure Check";
+                                if (id == "laplacian") name = "Laplacian Focus Check";
+                                if (id == "aiaesthetic") name = "AI Aesthetic Scorer";
+                                
+                                m_pipelineModel.addStep(id, name, enabled);
+                                loadedIds.push_back(id);
+                            }
                         }
+                        pipelineLoaded = true;
                     }
-                    pipelineLoaded = true;
                 }
             }
         }
-        if (!pipelineLoaded) {
-            m_pipelineModel.clear();
+    }
+
+    // If config didn't exist at all, clear and load defaults
+    if (!pipelineLoaded) {
+        m_pipelineModel.clear();
+        m_pipelineModel.addStep("exposure", "Exposure Check", true);
+        m_pipelineModel.addStep("laplacian", "Laplacian Focus Check", true);
+        m_pipelineModel.addStep("aiaesthetic", "AI Aesthetic Scorer", true);
+    } else {
+        // MERGE: If the config loaded, but is missing new tools, append them at the end.
+        if (std::find(loadedIds.begin(), loadedIds.end(), "exposure") == loadedIds.end()) {
+            m_pipelineModel.addStep("exposure", "Exposure Check", true);
+        }
+        if (std::find(loadedIds.begin(), loadedIds.end(), "laplacian") == loadedIds.end()) {
             m_pipelineModel.addStep("laplacian", "Laplacian Focus Check", true);
+        }
+        if (std::find(loadedIds.begin(), loadedIds.end(), "aiaesthetic") == loadedIds.end()) {
             m_pipelineModel.addStep("aiaesthetic", "AI Aesthetic Scorer", true);
         }
     }
@@ -673,11 +693,22 @@ void AppBackend::runScannerTask() {
                 if (result.success) {
                     int w = 0, h = 0;
                     ImageIO::readOriginalSize(file, w, h);
-                    float aestheticScore = 0.0f; 
-                    
-                    // EMIT RESULT WITH INDEX SO QML KNOWS WHICH CELL TO UPDATE
-                    emit fileProcessed(static_cast<int>(idx), result.isBlurry, aestheticScore, w, h);
-                }
+                    // Try to find the AI score in the metrics if it ran
+                    float aestheticScore = 0.0f;
+                    for (const auto& metric : result.metrics) {
+                        if (metric.key == "aesthetic_score" && std::holds_alternative<double>(metric.value)) {
+                            aestheticScore = static_cast<float>(std::get<double>(metric.value));
+                        }
+                    }
+                
+                    // For Laplacian backwards compatibility, if it's blurry, mark as rejected
+                    if (result.isBlurry && !result.rejected) {
+                        result.rejected = true;
+                        result.rejectReason = "Blurry";
+                    }
+
+                    emit fileProcessed(static_cast<int>(idx), result.rejected, QString::fromStdString(result.rejectReason), aestheticScore, w, h);
+                }   
 
                 if (idx % 5 == 0 || idx == m_files.size() - 1) {
                     QMetaObject::invokeMethod(this, [this, idx]() {

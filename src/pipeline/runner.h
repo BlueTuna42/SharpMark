@@ -2,6 +2,7 @@
 #include "interfaces.h"
 #include <vector>
 #include <memory>
+#include <QDebug>
 
 class PipelineRunner {
 private:
@@ -28,6 +29,8 @@ public:
         // Run the chain of Processors
         for (auto& p : processors_) {
             if (!p->supports(ctx)) continue;
+
+            if (result.rejected) break; 
 
             // Try Cache
             if (p->tryProcessFromCache(ctx, result)) {

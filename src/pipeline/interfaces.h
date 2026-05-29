@@ -24,6 +24,10 @@ struct ProcessingContext {
 struct ProcessingResult {
     bool success = true;
     bool isBlurry = false;
+
+    bool rejected = false; 
+    std::string rejectReason = ""; 
+
     std::vector<std::string> processorsRun;
     std::vector<AnalysisValue> metrics;
     std::vector<std::string> warnings;
