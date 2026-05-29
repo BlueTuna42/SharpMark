@@ -3,9 +3,8 @@
 
 #include <string>
 
-class XMPTools {
-public:
-    static int writeXmpRating(const std::string& filename, int rating);
-};
+namespace XMPTools {
+    int writeXmpRating(const std::string& exiftoolPath, const std::string& sourceFile, const std::string& targetFile, int rating);
+}
 
 #endif

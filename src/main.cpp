@@ -31,7 +31,6 @@
 #include "processors/state_cache.h"
 #include "processors/clip_embedding.h"
 #include "processors/aesthetic_scorer.h"
-#include "postprocessors/xmp_rating.h"
 #include "postprocessors/state_cache.h"
 
 void customMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg) {

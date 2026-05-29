@@ -31,7 +31,6 @@
 #include "processors/state_cache.h"
 #include "processors/clip_embedding.h"
 #include "processors/aesthetic_scorer.h"
-#include "postprocessors/xmp_rating.h"
 #include "postprocessors/state_cache.h"
 #include "img_tools/bmp.h"
 #include "gui/utils/path_utils.h"
@@ -59,7 +58,6 @@ PipelineRunner AppBackend::createPipeline() {
     }
 
     // Always add post-processors at the end (infrastructure)
-    runner.addPostProcessor(std::make_unique<XmpRatingPostProcessor>());
     runner.addPostProcessor(std::make_unique<StateCachePostProcessor>());
 
     return runner;
@@ -290,52 +288,74 @@ QVariantMap AppBackend::getPhotoMetadata(const QString& rawPath) {
 
 void AppBackend::loadRatings() {
     m_ratings.clear();
-    if (m_currentFolder.isEmpty()) return;
-    
-    QString ratingsFile = m_currentFolder + "/.laplacian_cache/ratings.csv";
-    QFile file(ratingsFile);
-    if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        QTextStream in(&file);
-        while (!in.atEnd()) {
-            QString line = in.readLine();
-            QStringList parts = line.split(',');
-            if (parts.size() >= 2) {
-                m_ratings[parts[0]] = parts[1].toInt();
-            }
-        }
-    }
 }
 
 void AppBackend::saveRatings() {
-    if (m_currentFolder.isEmpty()) return;
-    
-    QDir dir(m_currentFolder);
-    dir.mkpath(".laplacian_cache"); 
-    
-    QString ratingsFile = m_currentFolder + "/.laplacian_cache/ratings.csv";
-    QFile file(ratingsFile);
-    if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        QTextStream out(&file);
-        
-        for (auto it = m_ratings.begin(); it != m_ratings.end(); ++it) {
-            out << it->first << "," << it->second << "\n";
-        }
-    }
 }
 
 int AppBackend::getPhotoRating(const QString& rawPath) {
     QString cleanPath = QUrl::fromPercentEncoding(rawPath.toUtf8());
 #ifdef Q_OS_WIN
-    if (cleanPath.startsWith("file:///")) cleanPath = cleanPath.mid(8);
-    else if (cleanPath.startsWith('/')) cleanPath = cleanPath.mid(1);
-#else
-    if (cleanPath.startsWith("file://")) cleanPath = cleanPath.mid(7);
+    if (cleanPath.startsWith("file:///")) {
+        cleanPath = cleanPath.mid(8);
+    } else if (cleanPath.startsWith("/")) {
+        cleanPath = cleanPath.mid(1);
+    } else if (cleanPath.startsWith("file://")) {
+        cleanPath = cleanPath.mid(7);
+    }
 #endif
 
+    // 1. Return instantly if we already loaded or set this rating in this session
     if (m_ratings.find(cleanPath) != m_ratings.end()) {
         return m_ratings[cleanPath];
     }
-    return 0;
+
+    // 2. Fast native XMP read on the UI thread (Do NOT spawn QProcess/exiftool here)
+    int rating = 0;
+    QString fileToRead = cleanPath;
+    QFileInfo fi(cleanPath);
+    QString ext = fi.suffix().toLower();
+    QStringList rawFormats = {"cr2", "cr3", "nef", "arw", "dng", "raf", "orf", "rw2"};
+    
+    if (rawFormats.contains(ext)) {
+        QString sidecarPath = cleanPath + ".xmp";
+        if (QFileInfo::exists(sidecarPath)) {
+            fileToRead = sidecarPath;
+        }
+    }
+
+    std::ifstream file(fileToRead.toStdString(), std::ios::binary);
+    if (file.is_open()) {
+        const size_t bufferSize = 1024 * 1024; 
+        std::string buffer;
+        buffer.resize(bufferSize);
+        file.read(&buffer[0], bufferSize);
+        size_t bytesRead = file.gcount();
+        buffer.resize(bytesRead);
+
+        std::vector<std::pair<std::string, int>> patterns = {
+            {"xmp:Rating>", 11},
+            {"xmp:Rating=\"", 12},
+            {"<Rating>", 8},
+            {" Rating=\"", 9}
+        };
+
+        for (const auto& pat : patterns) {
+            size_t pos = buffer.find(pat.first);
+            if (pos != std::string::npos && pos + pat.second < buffer.size()) {
+                char val = buffer[pos + pat.second];
+                if (isdigit(val)) {
+                    rating = val - '0';
+                    break;
+                }
+            }
+        }
+    }
+
+    // 3. Cache it in memory for the rest of the session
+    m_ratings[cleanPath] = rating;
+
+    return rating;
 }
 
 void AppBackend::setPhotoRating(const QString& rawPath, int rating) {
@@ -343,14 +363,48 @@ void AppBackend::setPhotoRating(const QString& rawPath, int rating) {
 
     QString cleanPath = QUrl::fromPercentEncoding(rawPath.toUtf8());
 #ifdef Q_OS_WIN
-    if (cleanPath.startsWith("file:///")) cleanPath = cleanPath.mid(8);
-    else if (cleanPath.startsWith('/')) cleanPath = cleanPath.mid(1);
-#else
-    if (cleanPath.startsWith("file://")) cleanPath = cleanPath.mid(7);
+    if (cleanPath.startsWith("file:///")) {
+        cleanPath = cleanPath.mid(8);
+    } else if (cleanPath.startsWith("/")) {
+        cleanPath = cleanPath.mid(1);
+    } else if (cleanPath.startsWith("file://")) {
+        cleanPath = cleanPath.mid(7);
+    }
 #endif
 
     m_ratings[cleanPath] = rating;
     saveRatings();
+
+    if (m_writeExif) { 
+        QString exiftoolPath = QCoreApplication::applicationDirPath() + "/exiftool";
+#ifdef Q_OS_WIN
+        exiftoolPath += ".exe";
+#endif
+        
+        if (!QFileInfo::exists(exiftoolPath)) {
+            qDebug() << "CRITICAL ERROR: exiftool.exe NOT FOUND at" << exiftoolPath;
+            return;
+        }
+
+        std::string exiftoolPathStd = exiftoolPath.toStdString();
+        
+        QString targetPath = cleanPath;
+        QFileInfo fi(cleanPath);
+        QString ext = fi.suffix().toLower();
+        
+        QStringList rawFormats = {"cr2", "cr3", "nef", "arw", "dng", "raf", "orf", "rw2", "pef", "srw"};
+        if (rawFormats.contains(ext)) {
+            targetPath = cleanPath + ".xmp";
+        }
+        
+        std::string sourcePathStd = cleanPath.toStdString();
+        std::string targetPathStd = targetPath.toStdString();
+
+        std::thread([exiftoolPathStd, sourcePathStd, targetPathStd, rating]() {
+            int exitCode = XMPTools::writeXmpRating(exiftoolPathStd, sourcePathStd, targetPathStd, rating);
+            qDebug() << "DEBUG WRITE: ExifTool finished with exit code" << exitCode << "for" << QString::fromStdString(targetPathStd);
+        }).detach();
+    }
 
     if (rating == 0) return; // If we just cleared the rating, don't train
 
