@@ -63,8 +63,10 @@ PipelineRunner AppBackend::createPipeline() {
     return runner;
 }
 
-AppBackend::AppBackend(QObject *parent) : QObject(parent) {
-    m_statusText = "Ready";
+AppBackend::AppBackend(QObject *parent)
+    : QObject(parent), m_statusText("Ready") {
+    connect(&m_pipelineModel, &PipelineConfigModel::pipelineChanged, this, &AppBackend::saveSettings);
+
     loadSettings();
 }
 
@@ -522,6 +524,7 @@ void AppBackend::loadSettings() {
     if (!in.is_open()) return;
 
     std::string line;
+    bool pipelineLoaded = false;
     while (std::getline(in, line)) {
         std::istringstream iss(line);
         std::string key;
@@ -533,7 +536,32 @@ void AppBackend::loadSettings() {
                 else if (key == "cacheLaplacian") m_cacheLaplacian = (value == "1");
                 else if (key == "rawViewMode") m_rawViewMode = std::stoi(value);
                 else if (key == "rawAnalysisMode") m_rawAnalysisMode = std::stoi(value);
+                else if (key == "pipeline") {
+                    m_pipelineModel.clear();
+                    std::istringstream pStream(value);
+                    std::string token;
+                    while (std::getline(pStream, token, ',')) {
+                        size_t colonIdx = token.find(':');
+                        if (colonIdx != std::string::npos) {
+                            QString id = QString::fromStdString(token.substr(0, colonIdx));
+                            bool enabled = (token.substr(colonIdx + 1) == "1");
+                            
+                            // Restore human-readable names based on IDs
+                            QString name = id; 
+                            if (id == "laplacian") name = "Laplacian Focus Check";
+                            if (id == "aiaesthetic") name = "AI Aesthetic Scorer";
+                            
+                            m_pipelineModel.addStep(id, name, enabled);
+                        }
+                    }
+                    pipelineLoaded = true;
+                }
             }
+        }
+        if (!pipelineLoaded) {
+            m_pipelineModel.clear();
+            m_pipelineModel.addStep("laplacian", "Laplacian Focus Check", true);
+            m_pipelineModel.addStep("aiaesthetic", "AI Aesthetic Scorer", true);
         }
     }
 }
@@ -547,6 +575,13 @@ void AppBackend::saveSettings() {
     out << "cacheLaplacian=" << (m_cacheLaplacian ? 1 : 0) << "\n";
     out << "rawViewMode=" << m_rawViewMode << "\n";
     out << "rawAnalysisMode=" << m_rawAnalysisMode << "\n";
+    out << "pipeline=";
+    const auto& steps = m_pipelineModel.getSteps();
+    for (size_t i = 0; i < steps.size(); ++i) {
+        out << steps[i].id.toStdString() << ":" << (steps[i].enabled ? 1 : 0);
+        if (i < steps.size() - 1) out << ",";
+    }
+    out << "\n";
 }
 
 int AppBackend::themeMode() const { return m_themeMode; }

@@ -32,6 +32,49 @@ Window {
     property bool isGridView: true
     property bool pipelineVisible: false // Property for the left sidebar
 
+    component StyledButton : Button {
+        id: control
+        property bool isPrimary: false
+        
+        hoverEnabled: true
+
+        contentItem: Text {
+            text: control.text
+            font.pixelSize: 13
+            font.weight: control.isPrimary ? Font.Bold : Font.Normal
+            color: control.enabled ? (control.isPrimary ? "#ffffff" : textColor) : (isLight ? "#999999" : "#666666")
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        background: Rectangle {
+            implicitWidth: Math.max(110, control.contentItem.implicitWidth + 30)
+            implicitHeight: 34
+            radius: 6
+            color: {
+                if (control.isPrimary) {
+                    return control.down ? "#004a99" : (control.hovered ? "#0066cc" : "#005bb5")
+                } else {
+                    return control.down ? (isLight ? "#d0d0d0" : "#1a1a1a") :
+                           (control.hovered ? (isLight ? "#e0e0e0" : "#333333") :
+                                              (isLight ? "#f5f5f5" : "#252525"))
+                }
+            }
+            border.color: control.isPrimary ? "#004a99" : popupBorder
+            border.width: 1
+            opacity: control.enabled ? 1.0 : 0.4
+            
+            Behavior on color { ColorAnimation { duration: 100 } }
+        }
+        
+        // Hand cursor on hover
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            acceptedButtons: Qt.NoButton // Let the parent Button handle the actual click
+        }
+    }
+
     ListModel { id: resultsModel }
 
     Connections {
@@ -112,7 +155,7 @@ Window {
                 }
             }
             Item { Layout.fillHeight: true }
-            Button { text: "Close"; Layout.alignment: Qt.AlignHCenter; onClicked: settingsPopup.close() }
+            StyledButton { text: "Close"; Layout.alignment: Qt.AlignHCenter; onClicked: settingsPopup.close() }
         }
     }
     
@@ -242,7 +285,7 @@ Window {
                     anchors.margins: 30
                     spacing: 20
 
-                    Button {
+                    StyledButton {
                         text: "<- Previous"
                         onClicked: if (viewerWindow.currentIndex > 0) viewerWindow.currentIndex--
                         enabled: viewerWindow.currentIndex > 0
@@ -291,7 +334,7 @@ Window {
                         }
                     }
 
-                    Button {
+                    StyledButton {
                         text: "Next ->"
                         onClicked: if (viewerWindow.currentIndex < resultsModel.count - 1) viewerWindow.currentIndex++
                         enabled: viewerWindow.currentIndex < resultsModel.count - 1
@@ -386,7 +429,7 @@ Window {
             }
         }
 
-        Button {
+        StyledButton {
             anchors.top: parent.top
             anchors.right: parent.right
             anchors.margins: 15
@@ -550,23 +593,23 @@ Window {
                 Layout.fillWidth: true
                 spacing: 10
                 
-                Button { 
+                StyledButton { 
                     text: mainWindow.pipelineVisible ? "◀ Hide Pipeline" : "▶ Show Pipeline"
                     onClicked: mainWindow.pipelineVisible = !mainWindow.pipelineVisible 
                 }
                 
-                Button { text: "Open Folder"; onClicked: folderDialog.open() }
-                Button { text: "Start Scan"; onClicked: backend.startScan() }
-                Button { text: "Cancel"; onClicked: backend.cancelScan() }
+                StyledButton { text: "Open Folder"; onClicked: folderDialog.open() }
+                StyledButton { text: "Start Scan"; isPrimary: true; onClicked: backend.startScan() }
+                StyledButton { text: "Cancel"; onClicked: backend.cancelScan() }
                 
                 Rectangle { width: 1; height: 20; color: popupBorder; Layout.margins: 5 }
                 
-                Button { 
+                StyledButton { 
                     text: isGridView ? "View: Mosaic" : "View: List" 
                     onClicked: isGridView = !isGridView
                 }
                 
-                Button { 
+                StyledButton { 
                     text: "Settings"
                     onClicked: settingsPopup.open() 
                 }

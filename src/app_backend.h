@@ -14,6 +14,9 @@
 class PipelineConfigModel : public QAbstractListModel {
     Q_OBJECT
 
+signals:
+    void pipelineChanged();
+
 public:
     enum Roles {
         IdRole = Qt::UserRole + 1,
@@ -32,6 +35,17 @@ public:
         // Initialize with default tools
         m_steps.push_back({"laplacian", "Laplacian Focus Check", true});
         m_steps.push_back({"ai_aesthetic", "AI Aesthetic Scorer", true});
+    }
+
+    void clear() {
+        beginResetModel();
+        m_steps.clear();
+        endResetModel();
+    }
+    void addStep(const QString& id, const QString& name, bool enabled) {
+        beginInsertRows(QModelIndex(), m_steps.size(), m_steps.size());
+        m_steps.push_back({id, name, enabled});
+        endInsertRows();
     }
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const override {
@@ -76,23 +90,25 @@ public:
     Q_INVOKABLE void setStepEnabled(int index, bool enabled) {
         if (index >= 0 && index < m_steps.size()) {
             m_steps[index].enabled = enabled;
-            emit dataChanged(this->index(index, 0), this->index(index, 0), {EnabledRole});
+            emit dataChanged(this->index(index), this->index(index), {EnabledRole});
+            emit pipelineChanged();
         }
     }
 
     // Allow reordering from QML
     Q_INVOKABLE void moveStep(int fromIndex, int toIndex) {
-        if (fromIndex < 0 || fromIndex >= m_steps.size() || toIndex < 0 || toIndex >= m_steps.size() || fromIndex == toIndex)
-            return;
+        if (fromIndex < 0 || fromIndex >= m_steps.size() || 
+            toIndex < 0 || toIndex >= m_steps.size() || 
+            fromIndex == toIndex) return;
 
         int destRow = toIndex > fromIndex ? toIndex + 1 : toIndex;
         beginMoveRows(QModelIndex(), fromIndex, fromIndex, QModelIndex(), destRow);
-        
         auto step = m_steps[fromIndex];
         m_steps.erase(m_steps.begin() + fromIndex);
         m_steps.insert(m_steps.begin() + toIndex, step);
-        
         endMoveRows();
+        
+        emit pipelineChanged();
     }
 
     const std::vector<Step>& getSteps() const { return m_steps; }
