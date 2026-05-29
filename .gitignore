@@ -23,8 +23,6 @@
 *.a
 *.la
 *.lo
-*onnxruntime
-models/
 
 # Shared objects (inc. Windows DLLs)
 *.dll
@@ -80,3 +78,8 @@ Images
 *.json
 *.fftw
 *.zip
+
+#AI
+*.onnx
+*onnxruntime
+models/

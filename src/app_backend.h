@@ -4,9 +4,102 @@
 #include <QImage>
 #include <QString>
 #include <QVariantList>
+#include <QAbstractListModel>
 #include <atomic>
 #include <thread>
 #include <vector>
+#include <map>
+#include "pipeline/runner.h"
+
+class PipelineConfigModel : public QAbstractListModel {
+    Q_OBJECT
+
+public:
+    enum Roles {
+        IdRole = Qt::UserRole + 1,
+        NameRole,
+        EnabledRole
+    };
+
+    struct Step {
+        QString id;
+        QString name;
+        bool enabled;
+        // In the future, you can add parameters here (e.g., float threshold)
+    };
+
+    explicit PipelineConfigModel(QObject *parent = nullptr) : QAbstractListModel(parent) {
+        // Initialize with default tools
+        m_steps.push_back({"laplacian", "Laplacian Focus Check", true});
+        m_steps.push_back({"ai_aesthetic", "AI Aesthetic Scorer", true});
+    }
+
+    int rowCount(const QModelIndex &parent = QModelIndex()) const override {
+        if (parent.isValid()) return 0;
+        return static_cast<int>(m_steps.size());
+    }
+
+    QVariant data(const QModelIndex &index, int role = Qt::DisplayRole) const override {
+        if (!index.isValid() || index.row() >= static_cast<int>(m_steps.size()))
+            return QVariant();
+
+        const Step &step = m_steps[index.row()];
+        switch (role) {
+            case IdRole: return step.id;
+            case NameRole: return step.name;
+            case EnabledRole: return step.enabled;
+            default: return QVariant();
+        }
+    }
+
+    bool setData(const QModelIndex &index, const QVariant &value, int role = Qt::EditRole) override {
+        if (!index.isValid() || index.row() >= static_cast<int>(m_steps.size()))
+            return false;
+
+        Step &step = m_steps[index.row()];
+        if (role == EnabledRole) {
+            step.enabled = value.toBool();
+            emit dataChanged(index, index, {role});
+            return true;
+        }
+        return false;
+    }
+
+    QHash<int, QByteArray> roleNames() const override {
+        QHash<int, QByteArray> roles;
+        roles[IdRole] = "id";
+        roles[NameRole] = "name";
+        roles[EnabledRole] = "enabled";
+        return roles;
+    }
+
+    Q_INVOKABLE void setStepEnabled(int index, bool enabled) {
+        if (index >= 0 && index < m_steps.size()) {
+            m_steps[index].enabled = enabled;
+            emit dataChanged(this->index(index, 0), this->index(index, 0), {EnabledRole});
+        }
+    }
+
+    // Allow reordering from QML
+    Q_INVOKABLE void moveStep(int fromIndex, int toIndex) {
+        if (fromIndex < 0 || fromIndex >= m_steps.size() || toIndex < 0 || toIndex >= m_steps.size() || fromIndex == toIndex)
+            return;
+
+        int destRow = toIndex > fromIndex ? toIndex + 1 : toIndex;
+        beginMoveRows(QModelIndex(), fromIndex, fromIndex, QModelIndex(), destRow);
+        
+        auto step = m_steps[fromIndex];
+        m_steps.erase(m_steps.begin() + fromIndex);
+        m_steps.insert(m_steps.begin() + toIndex, step);
+        
+        endMoveRows();
+    }
+
+    const std::vector<Step>& getSteps() const { return m_steps; }
+
+private:
+    std::vector<Step> m_steps;
+};
 
 class AppBackend : public QObject {
     Q_OBJECT
@@ -33,6 +126,8 @@ public:
     Q_INVOKABLE void cancelScan();
     Q_INVOKABLE bool trashFile(const QString &filePath);
     Q_INVOKABLE QVariantMap getPhotoMetadata(const QString& filePath);
+    Q_INVOKABLE int getPhotoRating(const QString& filePath);
+    Q_INVOKABLE void setPhotoRating(const QString& filePath, int rating);
 
     void updateHistogramFromImage(const QImage& image);
     QString histogramBase64() const { return m_histogramBase64; }
@@ -56,6 +151,9 @@ public:
     
     int rawAnalysisMode() const; 
     void setRawAnalysisMode(int mode);
+
+    Q_PROPERTY(PipelineConfigModel* pipelineModel READ pipelineModel CONSTANT)
+    PipelineConfigModel* pipelineModel() { return &m_pipelineModel; }
 
 signals:
     void statusTextChanged();
@@ -103,4 +201,12 @@ private:
     QString getSettingsFilePath() const;
 
     QString m_histogramBase64;
+
+    PipelineConfigModel m_pipelineModel;
+
+    PipelineRunner createPipeline();
+
+    std::map<QString, int> m_ratings;
+    void loadRatings();
+    void saveRatings();
 };

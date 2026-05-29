@@ -1,6 +1,17 @@
 cmake_minimum_required(VERSION 3.16)
 project(SharpMark)
 
+add_compile_options(-w)
+
+# Enable colored diagnostics natively in CMake (v3.24+)
+set(CMAKE_COLOR_DIAGNOSTICS ON)
+set(CMAKE_COLOR_MAKEFILE ON)
+
+# Force GCC and Clang to always output colors
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options(-fdiagnostics-color=always)
+endif()
+
 # Define ANSI escape sequences for colored output (works in most terminals)
 if(NOT WIN32 OR (DEFINED ENV{TERM} AND NOT "$ENV{TERM}" STREQUAL ""))
     string(ASCII 27 Esc)

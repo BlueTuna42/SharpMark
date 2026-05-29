@@ -22,6 +22,7 @@
 #include <QFile>
 #include <QTextStream>
 
+#include "tools/XMP_tools.h"  
 #include "tools/scan.h"
 #include "pipeline/interfaces.h"
 #include "pipeline/runner.h"
@@ -33,25 +34,34 @@
 #include "postprocessors/xmp_rating.h"
 #include "postprocessors/state_cache.h"
 #include "img_tools/bmp.h"
+#include "gui/utils/path_utils.h"
 
-// Helper function exactly as it was in your main.cpp
-PipelineRunner createPipeline() {
+PipelineRunner AppBackend::createPipeline() {
     PipelineRunner runner;
-    
-    // Using the correct loader class name
     runner.setLoader(std::make_unique<DefaultImageLoader>());
     
+    // Always add state cache first (infrastructure)
     runner.addProcessor(std::make_unique<StateCacheProcessor>());
-    runner.addProcessor(std::make_unique<LaplacianFocusProcessor>());
-    
-#ifdef USE_ONNXRUNTIME
-    // runner.addProcessor(std::make_unique<ClipEmbeddingProcessor>("vision_model_quantized.onnx"));
-    // runner.addProcessor(std::make_unique<AestheticScorer>());
-#endif
 
+    // Dynamically add processors based on user configuration
+    const auto& steps = m_pipelineModel.getSteps();
+    for (const auto& step : steps) {
+        if (!step.enabled) continue;
+
+        if (step.id == "laplacian") {
+            runner.addProcessor(std::make_unique<LaplacianFocusProcessor>());
+        } 
+        else if (step.id == "ai_aesthetic") {
+            runner.addProcessor(std::make_unique<ClipEmbeddingProcessor>("vision_model_quantized.onnx"));
+            std::filesystem::path configDir = get_app_config_dir();
+            runner.addProcessor(std::make_unique<AestheticScorer>(configDir));
+        }
+    }
+
+    // Always add post-processors at the end (infrastructure)
     runner.addPostProcessor(std::make_unique<XmpRatingPostProcessor>());
     runner.addPostProcessor(std::make_unique<StateCachePostProcessor>());
-    
+
     return runner;
 }
 
@@ -162,24 +172,59 @@ QVariantMap AppBackend::getPhotoMetadata(const QString& rawPath) {
 
     // 4. Analysis Data: Read from .laplacian_cache/state.csv
     QFile csvFile(fileInfo.absolutePath() + "/.laplacian_cache/state.csv");
+    
+    // Build formatted HTML output for the UI
+    std::ostringstream finalHtml;
+    finalHtml << "<style>"
+              << "th { text-align: left; padding-right: 15px; color: #888; font-weight: normal; }"
+              << "td { color: #ddd; font-weight: bold; }"
+              << "h3 { color: #fff; margin-bottom: 5px; border-bottom: 1px solid #444; padding-bottom: 5px; }"
+              << "</style>";
+
+    // Output EXIF data if found during previous steps
+    if (foundData) {
+        finalHtml << "<h3>Camera & File</h3><table>";
+        // Simple parser for the data already collected in 'ss'
+        QString rawExif = QString::fromStdString(ss.str());
+        QStringList lines = rawExif.split('\n', Qt::SkipEmptyParts);
+        for (const QString& line : lines) {
+            int colonIdx = line.indexOf(':');
+            if (colonIdx != -1) {
+                finalHtml << "<tr><th>" << line.left(colonIdx).toStdString() << "</th>"
+                          << "<td>" << line.mid(colonIdx + 1).trimmed().toStdString() << "</td></tr>";
+            }
+        }
+        finalHtml << "</table><br>";
+    }
+
+    // Read metrics from CSV cache
+    bool analysisFound = false;
+    double laplacianScore = 0.0;
+    double aiScore = 0.0;
+    bool isBlurry = false;
+    bool hasAiScore = false;
+
     if (csvFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
         QTextStream in(&csvFile);
         QString targetPath = fileInfo.absoluteFilePath();
+
+        // Skip header if it exists
+        QString header = in.readLine(); 
         
         while (!in.atEnd()) {
             QString line = in.readLine();
             QStringList parts = line.split(',');
-            // CSV format: filePath, isBlurry, variance
+            
+            // CSV format: filePath, isBlurry, laplacian_variance, ai_score
             if (parts.size() >= 3) {
                 if (QFileInfo(parts[0]).absoluteFilePath() == targetPath || parts[0] == cleanPath) {
-                    bool isBlurry = (parts[1] == "1" || parts[1].toLower() == "true");
-                    double variance = parts[2].toDouble();
-                    
-                    ss << "<br><br><span style='color:#aaaaaa'>— Analysis —</span><br>";
-                    ss << "<b>Status:</b> <span style='color:" << (isBlurry ? "#ff5555" : "#55ff55") << "'>" 
-                       << (isBlurry ? "Blurry" : "Sharp") << "</span><br>";
-                    ss << "<b>Focus Score:</b> " << std::fixed << std::setprecision(2) << variance;
-                    
+                    isBlurry = (parts[1] == "1" || parts[1].toLower() == "true");
+                    laplacianScore = parts[2].toDouble();
+                    if (parts.size() >= 4) {
+                        aiScore = parts[3].toDouble();
+                        hasAiScore = true;
+                    }
+                    analysisFound = true;
                     foundData = true;
                     break;
                 }
@@ -187,13 +232,152 @@ QVariantMap AppBackend::getPhotoMetadata(const QString& rawPath) {
         }
     }
 
-    if (foundData) {
-        result["infoText"] = QString::fromStdString(ss.str());
-    } else {
-        result["infoText"] = "No EXIF or Analysis data available";
+    // Recalculate AI score on the fly
+    std::filesystem::path imgPath(cleanPath.toStdString());
+    std::filesystem::path clipPath = imgPath.parent_path() / ".laplacian_cache" / (imgPath.filename().string() + ".clip");
+
+    if (std::filesystem::exists(clipPath)) {
+        std::vector<float> clipVector(512);
+        std::ifstream clipFile(clipPath, std::ios::binary);
+        
+        if (clipFile.is_open()) {
+            clipFile.read(reinterpret_cast<char*>(clipVector.data()), 512 * sizeof(float));
+            clipFile.close();
+            
+            // Load latest weights and calculate fresh score
+            std::string exeDir = QCoreApplication::applicationDirPath().toStdString();
+            AestheticScorer scorer(exeDir);
+            
+            aiScore = scorer.evaluate(clipVector);
+            hasAiScore = true; // Force display even if CSV didn't have it
+            analysisFound = true;
+            foundData = true;
+        }
     }
-    
+
+    // Append pipeline metrics to HTML
+    if (analysisFound) {
+        finalHtml << "<h3>Pipeline Metrics</h3><table>";
+        
+        // Status indicator
+        QString statusColor = isBlurry ? "#ff4444" : "#44ff44";
+        QString statusText = isBlurry ? "BLURRY" : "SHARP";
+        finalHtml << "<tr><th>Decision</th><td style='color: " << statusColor.toStdString() << "'>" 
+                  << statusText.toStdString() << "</td></tr>";
+        
+        // Focus score (Laplacian)
+        finalHtml << "<tr><th>Laplacian Focus</th><td>" 
+                  << std::fixed << std::setprecision(2) << laplacianScore << "</td></tr>";
+                  
+        // Aesthetic score (AI)
+         if (hasAiScore)  {
+            finalHtml << "<tr><th>AI metric</th><td>" 
+                      << std::fixed << std::setprecision(2) << aiScore << "</td></tr>";
+        }
+        
+        finalHtml << "</table>";
+    }
+
+    // Finalize output
+    if (!foundData) {
+        result["infoText"] = "<p style='color: #888;'>No EXIF or Analysis data available</p>";
+    } else {
+        result["infoText"] = QString::fromStdString(finalHtml.str());
+    }
+
     return result;
+}
+
+void AppBackend::loadRatings() {
+    m_ratings.clear();
+    if (m_currentFolder.isEmpty()) return;
+    
+    QString ratingsFile = m_currentFolder + "/.laplacian_cache/ratings.csv";
+    QFile file(ratingsFile);
+    if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QTextStream in(&file);
+        while (!in.atEnd()) {
+            QString line = in.readLine();
+            QStringList parts = line.split(',');
+            if (parts.size() >= 2) {
+                m_ratings[parts[0]] = parts[1].toInt();
+            }
+        }
+    }
+}
+
+void AppBackend::saveRatings() {
+    if (m_currentFolder.isEmpty()) return;
+    
+    QDir dir(m_currentFolder);
+    dir.mkpath(".laplacian_cache"); 
+    
+    QString ratingsFile = m_currentFolder + "/.laplacian_cache/ratings.csv";
+    QFile file(ratingsFile);
+    if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QTextStream out(&file);
+        
+        for (auto it = m_ratings.begin(); it != m_ratings.end(); ++it) {
+            out << it->first << "," << it->second << "\n";
+        }
+    }
+}
+
+int AppBackend::getPhotoRating(const QString& rawPath) {
+    QString cleanPath = QUrl::fromPercentEncoding(rawPath.toUtf8());
+#ifdef Q_OS_WIN
+    if (cleanPath.startsWith("file:///")) cleanPath = cleanPath.mid(8);
+    else if (cleanPath.startsWith('/')) cleanPath = cleanPath.mid(1);
+#else
+    if (cleanPath.startsWith("file://")) cleanPath = cleanPath.mid(7);
+#endif
+
+    if (m_ratings.find(cleanPath) != m_ratings.end()) {
+        return m_ratings[cleanPath];
+    }
+    return 0;
+}
+
+void AppBackend::setPhotoRating(const QString& rawPath, int rating) {
+    if (rating < 0 || rating > 5) return; // Allow 0 to clear rating
+
+    QString cleanPath = QUrl::fromPercentEncoding(rawPath.toUtf8());
+#ifdef Q_OS_WIN
+    if (cleanPath.startsWith("file:///")) cleanPath = cleanPath.mid(8);
+    else if (cleanPath.startsWith('/')) cleanPath = cleanPath.mid(1);
+#else
+    if (cleanPath.startsWith("file://")) cleanPath = cleanPath.mid(7);
+#endif
+
+    m_ratings[cleanPath] = rating;
+    saveRatings();
+
+    if (rating == 0) return; // If we just cleared the rating, don't train
+
+    std::filesystem::path imgPath(cleanPath.toStdString());
+    std::filesystem::path clipPath = imgPath.parent_path() / ".laplacian_cache" / (imgPath.filename().string() + ".clip");
+
+    if (!std::filesystem::exists(clipPath)) {
+        qWarning() << "[AI Train] .clip vector NOT FOUND at:" << QString::fromStdString(clipPath.string());
+        return;
+    }
+
+    std::vector<float> clipVector(512);
+    std::ifstream clipFile(clipPath, std::ios::binary);
+    if (clipFile.is_open()) {
+        clipFile.read(reinterpret_cast<char*>(clipVector.data()), 512 * sizeof(float));
+        clipFile.close();
+    } else {
+        qWarning() << "[AI Train] Failed to read .clip file!";
+        return; 
+    }
+
+    std::string exeDir = QCoreApplication::applicationDirPath().toStdString();
+    
+    qDebug() << "[AI Train] Started for rating:" << rating;
+    AestheticScorer scorer(exeDir);
+    scorer.train(clipVector, rating);
+    qDebug() << "[AI Train] Success! Weights saved to:" << QString::fromStdString(exeDir) + "/aesthetic_weights.bin";
 }
 
 void AppBackend::updateHistogramFromImage(const QImage& src) {
@@ -376,7 +560,7 @@ void AppBackend::runScannerTask() {
 
     for (unsigned int i = 0; i < threadsToUse; ++i) {
         workers.emplace_back([this, &fileIndex]() {
-            PipelineRunner runner = createPipeline();
+            PipelineRunner runner = this->createPipeline();
             AppSettings settings; 
 
             while (!m_cancelRequested) {

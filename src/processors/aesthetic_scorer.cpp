@@ -51,9 +51,10 @@ void AestheticScorer::process(std::unique_ptr<ImageBuffer>& image, const Process
 
     // 3. Save to metrics so GUI can sort by it
     result.metrics.push_back({"aesthetic_score", static_cast<double>(score)});
+    result.sharedData["aesthetic_score"] = static_cast<double>(score);
 }
 
-void AestheticScorer::train(const std::vector<float>& features, bool isGoodPhoto) {
+void AestheticScorer::train(const std::vector<float>& features, int rating) {
     if (features.size() != 512) return;
 
     std::lock_guard<std::mutex> lock(weights_mtx_);
@@ -63,7 +64,7 @@ void AestheticScorer::train(const std::vector<float>& features, bool isGoodPhoto
         current_score += user_weights_[i] * features[i];
     }
 
-    float target_score = isGoodPhoto ? 1.0f : -1.0f;
+    float target_score = (rating - 3.0f) / 2.0f;
 
     float error = target_score - current_score;
 
@@ -73,4 +74,15 @@ void AestheticScorer::train(const std::vector<float>& features, bool isGoodPhoto
         user_weights_[i] += learning_rate * error * features[i];
     }
     saveWeights();
+}
+
+float AestheticScorer::evaluate(const std::vector<float>& features) {
+    if (features.size() != 512) return 0.0f;
+    
+    std::lock_guard<std::mutex> lock(weights_mtx_);
+    float score = 0.0f;
+    for (size_t i = 0; i < 512; ++i) {
+        score += user_weights_[i] * features[i];
+    }
+    return score;
 }

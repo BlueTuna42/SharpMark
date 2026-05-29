@@ -24,6 +24,7 @@ public:
     bool tryProcessFromCache(const ProcessingContext& ctx, ProcessingResult& result) override { return false; }
     void process(std::unique_ptr<ImageBuffer>& image, const ProcessingContext& ctx, ProcessingResult& result) override;
 
-    // The Active Learning function (Called from UI when user Likes/Dislikes a photo)
-    void train(const std::vector<float>& features, bool isGoodPhoto);
+    // The Active Learning function
+    void train(const std::vector<float>& features, int rating);
+    float evaluate(const std::vector<float>& features);
 };

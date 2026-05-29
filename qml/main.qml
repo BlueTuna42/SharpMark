@@ -30,6 +30,7 @@ Window {
     property color cardSharpText: isLight ? "#008800" : "#88ff88"
 
     property bool isGridView: true
+    property bool pipelineVisible: false // Property for the left sidebar
 
     ListModel { id: resultsModel }
 
@@ -122,7 +123,7 @@ Window {
         buttons: MessageDialog.Yes | MessageDialog.No
         
         property int targetIndex: -1
-
+        
         onButtonClicked: function(button, role) {
             if (button === MessageDialog.Yes && targetIndex !== -1) {
                 let file = resultsModel.get(targetIndex).filePath;
@@ -132,11 +133,9 @@ Window {
                     if (resultsModel.count === 0) {
                         viewerWindow.close();
                     } else {
-                        // Keep index within bounds after deletion
                         if (targetIndex >= resultsModel.count) {
                             viewerWindow.currentIndex = resultsModel.count - 1;
                         } else {
-                            // Force UI refresh for the same index
                             let temp = targetIndex;
                             viewerWindow.currentIndex = -1;
                             viewerWindow.currentIndex = temp;
@@ -159,10 +158,15 @@ Window {
         property int currentIndex: -1
         property string exifInfo: ""
         property bool sidebarVisible: true
+        
+        property int currentRating: 0
+        property string currentFilePath: ""
 
         onCurrentIndexChanged: {
             if (currentIndex >= 0 && currentIndex < resultsModel.count) {
                 const file = resultsModel.get(currentIndex).filePath
+                
+                viewerWindow.currentFilePath = file;
                 
                 viewerImage.scale = 1.0
                 flickable.contentX = 0
@@ -172,9 +176,12 @@ Window {
                 viewerImage.source = "image://full/" + encodeURIComponent(file)
                 title = "Viewer - " + resultsModel.get(currentIndex).fileName
                 
-                // Fetch EXIF metadata from C++
                 let meta = backend.getPhotoMetadata(encodeURIComponent(file));
                 exifInfo = meta.infoText;
+                
+                viewerWindow.currentRating = backend.getPhotoRating(file);
+                
+                console.log("[QML] Photo changed. New Path:", viewerWindow.currentFilePath, "Rating:", viewerWindow.currentRating);
             }
         }
 
@@ -182,7 +189,6 @@ Window {
             anchors.fill: parent
             spacing: 0
 
-            // Left side: The Image Viewer
             Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -230,7 +236,6 @@ Window {
                     height: 64
                 }
 
-                // Bottom Navigation Bar overlay
                 RowLayout {
                     anchors.bottom: parent.bottom
                     anchors.horizontalCenter: parent.horizontalCenter
@@ -243,12 +248,46 @@ Window {
                         enabled: viewerWindow.currentIndex > 0
                     }
                     
-                    Button {
-                        text: "Trash Photo"
-                        icon.name: "user-trash"
-                        onClicked: {
-                            trashConfirmDialog.targetIndex = viewerWindow.currentIndex;
-                            trashConfirmDialog.open();
+                    // Lightroom-style star rating
+                    Rectangle {
+                        color: "#aa000000" 
+                        radius: 8
+                        Layout.preferredHeight: 40
+                        Layout.preferredWidth: 180
+                        z: 10
+                        
+                        Row {
+                            anchors.centerIn: parent
+                            spacing: 8
+                            
+                            Repeater {
+                                model: 5
+                                delegate: Text {
+                                    property int starVal: index + 1 
+                                    
+                                    text: starVal <= viewerWindow.currentRating ? "★" : "☆"
+                                    color: starVal <= viewerWindow.currentRating ? "#FFD700" : "#aaaaaa"
+                                    font.pixelSize: 32
+                                    
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        
+                                        onClicked: {
+                                            console.log("[QML] Star clicked:", starVal);
+                                            
+                                            if (viewerWindow.currentRating === starVal) {
+                                                viewerWindow.currentRating = 0; 
+                                            } else {
+                                                viewerWindow.currentRating = starVal;
+                                            }
+                                            
+                                            console.log("[QML] New rating:", viewerWindow.currentRating, "Path:", viewerWindow.currentFilePath);
+                                            backend.setPhotoRating(viewerWindow.currentFilePath, viewerWindow.currentRating);
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -258,9 +297,25 @@ Window {
                         enabled: viewerWindow.currentIndex < resultsModel.count - 1
                     }
                 }
-            }
 
-            // Right side: Metadata Sidebar
+                function setRatingFromKey(rating) {
+                    console.log("[QML] Key pressed:", rating);
+                    if (viewerWindow.currentRating === rating) {
+                        viewerWindow.currentRating = 0;
+                    } else {
+                        viewerWindow.currentRating = rating;
+                    }
+                        backend.setPhotoRating(viewerWindow.currentFilePath, viewerWindow.currentRating);
+                }   
+
+                Shortcut { sequence: "1"; onActivated: viewerWindow.setRatingFromKey(1) }
+                Shortcut { sequence: "2"; onActivated: viewerWindow.setRatingFromKey(2) }
+                Shortcut { sequence: "3"; onActivated: viewerWindow.setRatingFromKey(3) }
+                Shortcut { sequence: "4"; onActivated: viewerWindow.setRatingFromKey(4) }
+                Shortcut { sequence: "5"; onActivated: viewerWindow.setRatingFromKey(5) }
+                Shortcut { sequence: "0"; onActivated: viewerWindow.setRatingFromKey(0) }
+            }
+            
             Rectangle {
                 id: sidebar
                 Layout.preferredWidth: viewerWindow.sidebarVisible ? 300 : 0
@@ -282,7 +337,7 @@ Window {
                     anchors.fill: parent
                     anchors.margins: 15
                     spacing: 15
-                    visible: sidebar.Layout.preferredWidth > 100 // Hide content during animation
+                    visible: sidebar.Layout.preferredWidth > 100
 
                     Text {
                         text: "Metadata & Analysis"
@@ -325,12 +380,12 @@ Window {
                         Layout.fillHeight: true
                         wrapMode: Text.WordWrap
                         verticalAlignment: Text.AlignTop
+                        onLinkActivated: (link) => Qt.openUrlExternally(link)
                     }
                 }
             }
         }
 
-        // Toggle Sidebar Button (Top Right)
         Button {
             anchors.top: parent.top
             anchors.right: parent.right
@@ -352,133 +407,273 @@ Window {
         }
     }
 
-    ColumnLayout {
+    // ==========================================
+    // MAIN INTERFACE (LEFT SIDEBAR + RIGHT CONTENT)
+    // ==========================================
+    RowLayout {
         anchors.fill: parent
-        anchors.margins: 20
-        spacing: 15
+        spacing: 0
 
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 10
-            
-            Button { text: "Open Folder"; onClicked: folderDialog.open() }
-            Button { text: "Start Scan"; onClicked: backend.startScan() }
-            Button { text: "Cancel"; onClicked: backend.cancelScan() }
-            
-            Rectangle { width: 1; height: 20; color: popupBorder; Layout.margins: 5 }
-            
-            Button { 
-                text: isGridView ? "View: Mosaic" : "View: List" 
-                onClicked: isGridView = !isGridView
-            }
-            
-            Button { 
-                text: "Settings"
-                onClicked: settingsPopup.open() 
-            }
-            
-            Item { Layout.fillWidth: true } 
-            Text { text: backend.statusText; color: textColor; font.pixelSize: 16 }
-        }
-
-        ProgressBar {
-            Layout.fillWidth: true
-            from: 0; to: backend.totalFiles; value: backend.progress
-            visible: backend.totalFiles > 0
-        }
-
-        Item {
-            Layout.fillWidth: true
+        // LEFT SIDEBAR (Pipeline)
+        Rectangle {
+            id: pipelineSidebar
+            Layout.preferredWidth: mainWindow.pipelineVisible ? 280 : 0
             Layout.fillHeight: true
+            color: popupBg
+            clip: true
+            
+            Behavior on Layout.preferredWidth { NumberAnimation { duration: 200; easing.type: Easing.OutQuad } }
 
-            GridView {
+            Rectangle {
+                width: 1
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                color: popupBorder
+            }
+
+            ColumnLayout {
                 anchors.fill: parent
-                model: resultsModel
-                clip: true
-                cellWidth: 220; cellHeight: 260
-                visible: isGridView
+                anchors.margins: 15
+                spacing: 15
+                visible: pipelineSidebar.Layout.preferredWidth > 50
 
-                delegate: Rectangle {
-                    width: 200; height: 240
-                    color: model.status === "WAITING" ? cardWaitingBg : (model.isBlurry ? cardBlurryBg : cardSharpBg)
-                    radius: 6
-                    border.color: model.status === "WAITING" ? cardWaitingBorder : (model.isBlurry ? cardBlurryBorder : cardSharpBorder)
-                    border.width: 1
+                Text { text: "Pipeline Config"; color: textColor; font.bold: true; font.pixelSize: 16 }
+                Text { text: "Drag '≡' to reorder."; color: isLight ? "#666" : "#aaa"; font.pixelSize: 12 }
 
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: {
-                            viewerWindow.currentIndex = index;
-                            viewerWindow.show();
-                        }
-                    }
+                ListView {
+                    id: pipelineList
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
+                    spacing: 5
 
-                    ColumnLayout {
-                        anchors.fill: parent
-                        anchors.margins: 8
-                        spacing: 5
+                    model: DelegateModel {
+                        id: visualModel
+                        model: backend.pipelineModel
+                        
+                        delegate: DropArea {
+                            id: delegateRoot
+                            width: ListView.view.width
+                            height: 45
+                            keys: ["step"]
+                            
+                            property int visualIndex: DelegateModel.itemsIndex
+                            
+                            onEntered: (drag) => {
+                                let from = drag.source.visualIndex;
+                                let to = delegateRoot.visualIndex;
+                                if (from !== to) {
+                                    visualModel.items.move(from, to);
+                                    backend.pipelineModel.moveStep(from, to);
+                                }
+                            }
 
-                        Image {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: 160
-                            source: "image://preview/" + model.filePath
-                            asynchronous: true 
-                            fillMode: Image.PreserveAspectFit
-                            Rectangle { anchors.fill: parent; color: "black"; z: -1 }
-                        }
+                            Rectangle {
+                                id: itemRect
+                                width: parent.width
+                                height: parent.height
+                                color: isLight ? "#f0f0f0" : "#2a2a2a"
+                                radius: 4
+                                border.color: popupBorder
 
-                        Text { text: model.fileName; color: textColor; font.pixelSize: 12; Layout.fillWidth: true; elide: Text.ElideRight }
+                                anchors {
+                                    horizontalCenter: parent.horizontalCenter
+                                    verticalCenter: parent.verticalCenter
+                                }
 
-                        Text { 
-                            text: model.status === "WAITING" ? "Waiting..." : (model.status + " (" + model.score + ")")
-                            color: model.status === "WAITING" ? cardWaitingText : (model.isBlurry ? cardBlurryText : cardSharpText)
-                            font.bold: true; font.pixelSize: 12
+                                Drag.active: dragArea.drag.active
+                                Drag.source: delegateRoot
+                                Drag.keys: ["step"]
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 8
+
+                                    Item {
+                                        width: 24
+                                        height: parent.height
+                                        
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "≡"
+                                            color: isLight ? "#888" : "#666"
+                                            font.pixelSize: 18
+                                        }
+                                        
+                                        MouseArea {
+                                            id: dragArea
+                                            anchors.fill: parent
+                                            drag.target: itemRect
+                                            drag.axis: Drag.YAxis
+                                        }
+                                    }
+
+                                    CheckBox {
+                                        checked: model.enabled
+                                        onCheckedChanged: {
+                                            backend.pipelineModel.setStepEnabled(model.index, checked);
+                                        }
+                                    }
+
+                                    Text {
+                                        text: model.name
+                                        color: model.enabled ? textColor : (isLight ? "#999" : "#666")
+                                        Layout.fillWidth: true
+                                        font.pixelSize: 13
+                                    }
+                                }
+
+                                states: [
+                                    State {
+                                        when: dragArea.drag.active
+                                        ParentChange { target: itemRect; parent: pipelineList }
+                                        AnchorChanges { target: itemRect; anchors.horizontalCenter: undefined; anchors.verticalCenter: undefined }
+                                        PropertyChanges { target: itemRect; opacity: 0.8; z: 10 }
+                                    }
+                                ]
+                            }
                         }
                     }
                 }
             }
+        }
 
-            ListView {
-                anchors.fill: parent
-                model: resultsModel
-                clip: true
-                spacing: 4
-                visible: !isGridView
+        // RIGHT SIDE (Main Content)
+        ColumnLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            anchors.margins: 20
+            spacing: 15
 
-                delegate: Rectangle {
-                    width: ListView.view.width; height: 60
-                    color: model.status === "WAITING" ? cardWaitingBg : (model.isBlurry ? cardBlurryBg : cardSharpBg)
-                    radius: 4
-                    border.color: model.status === "WAITING" ? cardWaitingBorder : (model.isBlurry ? cardBlurryBorder : cardSharpBorder)
-                    border.width: 1
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 10
+                
+                Button { 
+                    text: mainWindow.pipelineVisible ? "◀ Hide Pipeline" : "▶ Show Pipeline"
+                    onClicked: mainWindow.pipelineVisible = !mainWindow.pipelineVisible 
+                }
+                
+                Button { text: "Open Folder"; onClicked: folderDialog.open() }
+                Button { text: "Start Scan"; onClicked: backend.startScan() }
+                Button { text: "Cancel"; onClicked: backend.cancelScan() }
+                
+                Rectangle { width: 1; height: 20; color: popupBorder; Layout.margins: 5 }
+                
+                Button { 
+                    text: isGridView ? "View: Mosaic" : "View: List" 
+                    onClicked: isGridView = !isGridView
+                }
+                
+                Button { 
+                    text: "Settings"
+                    onClicked: settingsPopup.open() 
+                }
+                
+                Item { Layout.fillWidth: true } 
+                Text { text: backend.statusText; color: textColor; font.pixelSize: 16 }
+            }
 
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: {
-                            viewerWindow.currentIndex = index;
-                            viewerWindow.show();
+            ProgressBar {
+                Layout.fillWidth: true
+                from: 0; to: backend.totalFiles; value: backend.progress
+                visible: backend.totalFiles > 0
+            }
+
+            Item {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+
+                GridView {
+                    anchors.fill: parent
+                    model: resultsModel
+                    clip: true
+                    cellWidth: 220; cellHeight: 260
+                    visible: isGridView
+
+                    delegate: Rectangle {
+                        width: 200; height: 240
+                        color: model.status === "WAITING" ? cardWaitingBg : (model.isBlurry ? cardBlurryBg : cardSharpBg)
+                        radius: 6
+                        border.color: model.status === "WAITING" ? cardWaitingBorder : (model.isBlurry ? cardBlurryBorder : cardSharpBorder)
+                        border.width: 1
+
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: {
+                                viewerWindow.currentIndex = index;
+                                viewerWindow.show();
+                            }
+                        }
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 8
+                            spacing: 5
+
+                            Image {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 160
+                                source: "image://preview/" + model.filePath
+                                asynchronous: true 
+                                fillMode: Image.PreserveAspectFit
+                                Rectangle { anchors.fill: parent; color: "black"; z: -1 }
+                            }
+
+                            Text { text: model.fileName; color: textColor; font.pixelSize: 12; Layout.fillWidth: true; elide: Text.ElideRight }
+
+                            Text { 
+                                text: model.status === "WAITING" ? "Waiting..." : (model.status + " (" + model.score + ")")
+                                color: model.status === "WAITING" ? cardWaitingText : (model.isBlurry ? cardBlurryText : cardSharpText)
+                                font.bold: true; font.pixelSize: 12
+                            }
                         }
                     }
+                }
 
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.margins: 5
-                        spacing: 15
+                ListView {
+                    anchors.fill: parent
+                    model: resultsModel
+                    clip: true
+                    spacing: 4
+                    visible: !isGridView
 
-                        Image {
-                            Layout.preferredWidth: 70; Layout.preferredHeight: 50
-                            source: "image://preview/" + model.filePath
-                            asynchronous: true; fillMode: Image.PreserveAspectFit
-                            Rectangle { anchors.fill: parent; color: "black"; z: -1 }
+                    delegate: Rectangle {
+                        width: ListView.view.width; height: 60
+                        color: model.status === "WAITING" ? cardWaitingBg : (model.isBlurry ? cardBlurryBg : cardSharpBg)
+                        radius: 4
+                        border.color: model.status === "WAITING" ? cardWaitingBorder : (model.isBlurry ? cardBlurryBorder : cardSharpBorder)
+                        border.width: 1
+
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: {
+                                viewerWindow.currentIndex = index;
+                                viewerWindow.show();
+                            }
                         }
 
-                        Text { text: model.fileName; color: textColor; font.pixelSize: 14; Layout.fillWidth: true; elide: Text.ElideRight }
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: 5
+                            spacing: 15
 
-                        Text { 
-                            text: model.status === "WAITING" ? "Waiting for scan..." : (model.status + " (" + model.score + ")")
-                            color: model.status === "WAITING" ? cardWaitingText : (model.isBlurry ? cardBlurryText : cardSharpText)
-                            font.bold: true; font.pixelSize: 14
-                            Layout.alignment: Qt.AlignRight; Layout.rightMargin: 10
+                            Image {
+                                Layout.preferredWidth: 70; Layout.preferredHeight: 50
+                                source: "image://preview/" + model.filePath
+                                asynchronous: true; fillMode: Image.PreserveAspectFit
+                                Rectangle { anchors.fill: parent; color: "black"; z: -1 }
+                            }
+
+                            Text { text: model.fileName; color: textColor; font.pixelSize: 14; Layout.fillWidth: true; elide: Text.ElideRight }
+
+                            Text { 
+                                text: model.status === "WAITING" ? "Waiting for scan..." : (model.status + " (" + model.score + ")")
+                                color: model.status === "WAITING" ? cardWaitingText : (model.isBlurry ? cardBlurryText : cardSharpText)
+                                font.bold: true; font.pixelSize: 14
+                                Layout.alignment: Qt.AlignRight; Layout.rightMargin: 10
+                            }
                         }
                     }
                 }
