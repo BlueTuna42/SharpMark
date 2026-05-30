@@ -33,6 +33,16 @@ Window {
     property bool pipelineVisible: false // Property for the left sidebar
     property bool groupBursts: backend.groupBursts
 
+    function toggleGroupExpansion(leadIndex) {
+            let isExpanded = !resultsModel.get(leadIndex).isExpanded
+            resultsModel.setProperty(leadIndex, "isExpanded", isExpanded)
+        
+            for (let i = leadIndex + 1; i < resultsModel.count; i++) {
+                if (resultsModel.get(i).isLead) break;
+                resultsModel.setProperty(i, "isExpanded", isExpanded)
+            }
+        }
+
     component StyledButton : Button {
         id: control
         property bool isPrimary: false
@@ -90,7 +100,8 @@ Window {
                 score: "0.00",
                 status: "WAITING",
                 isLead: true,  
-                groupCount: 1  
+                groupCount: 1,
+                isExpanded: false
             })
         }
 
@@ -706,9 +717,10 @@ Window {
                     }
 
                     delegate: Rectangle {
-                        width: (mainWindow.groupBursts && !model.isLead) ? 0 : 200
-                        height: (mainWindow.groupBursts && !model.isLead) ? 0 : 240
-                        visible: !(mainWindow.groupBursts && !model.isLead)
+                        property bool shouldShow: !mainWindow.groupBursts || model.isLead || model.isExpanded
+                        width: shouldShow ? 200 : 0
+                        height: shouldShow ? 240 : 0
+                        visible: shouldShow
                         color: model.status === "WAITING" ? cardWaitingBg : (model.isRejected ? cardBlurryBg : cardSharpBg)
                         radius: 6
                         border.color: model.status === "WAITING" ? cardWaitingBorder : (model.isRejected ? cardBlurryBorder : cardSharpBorder)
@@ -776,10 +788,20 @@ Window {
 
                             Text {
                                 anchors.centerIn: parent
-                                text: "+" + (model.groupCount - 1)
+                                // Show "<" if expanded, otherwise "+X"
+                                text: model.isExpanded ? "<" : ("+" + (model.groupCount - 1))
                                 color: "white"
                                 font.bold: true
-                                font.pixelSize: 12
+                                font.pixelSize: 14
+                            }
+                            
+                            // Make it clickable!
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    mainWindow.toggleGroupExpansion(index)
+                                }
                             }
                         }
 
@@ -817,9 +839,10 @@ Window {
                     }
 
                     delegate: Rectangle {
+                        property bool shouldShow: !mainWindow.groupBursts || model.isLead || model.isExpanded
                         width: ListView.view.width
-                        height: (mainWindow.groupBursts && !model.isLead) ? 0 : 60
-                        visible: !(mainWindow.groupBursts && !model.isLead)
+                        height: shouldShow ? 60 : 0
+                        visible: shouldShow
                         color: model.status === "WAITING" ? cardWaitingBg : (model.isRejected ? cardBlurryBg : cardSharpBg)
                         radius: 4
                         border.color: model.status === "WAITING" ? cardWaitingBorder : (model.isRejected ? cardBlurryBorder : cardSharpBorder)

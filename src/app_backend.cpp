@@ -714,7 +714,7 @@ void AppBackend::runScannerTask() {
                         std::string hashStr = std::get<std::string>(metric.value);
                         try {
                             currentHash = std::stoull(hashStr, nullptr, 16);
-                            qDebug() << "Extracted hash:" << QString::fromStdString(hashStr) << "for" << QString::fromStdString(file);
+                            //qDebug() << "Extracted hash:" << QString::fromStdString(hashStr) << "for" << QString::fromStdString(file);
                         } catch (...) {
                             currentHash = 0;
                         }
