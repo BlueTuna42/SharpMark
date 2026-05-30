@@ -33,15 +33,21 @@ Window {
     property bool pipelineVisible: false // Property for the left sidebar
     property bool groupBursts: backend.groupBursts
 
-    function toggleGroupExpansion(leadIndex) {
-            let isExpanded = !resultsModel.get(leadIndex).isExpanded
-            resultsModel.setProperty(leadIndex, "isExpanded", isExpanded)
+    function toggleGroupExpansion(proxyIndex) {
+        let sourceIndex = backend.burstProxy.mapToSourceRow(proxyIndex)
+        let expandedState = !resultsModel.get(sourceIndex).isExpanded
+        resultsModel.setProperty(sourceIndex, "isExpanded", expandedState)
         
-            for (let i = leadIndex + 1; i < resultsModel.count; i++) {
-                if (resultsModel.get(i).isLead) break;
-                resultsModel.setProperty(i, "isExpanded", isExpanded)
-            }
+        for (let i = sourceIndex + 1; i < backend.burstProxy.count; i++) {
+            if (resultsModel.get(i).isLead) break;
+            resultsModel.setProperty(i, "isExpanded", expandedState)
         }
+    }
+
+    Component.onCompleted: {
+        backend.burstProxy.source = resultsModel
+        backend.burstProxy.groupBursts = Qt.binding(() => mainWindow.groupBursts)
+    }
 
     component StyledButton : Button {
         id: control
@@ -237,8 +243,8 @@ Window {
         property string currentFilePath: ""
 
         onCurrentIndexChanged: {
-            if (currentIndex >= 0 && currentIndex < resultsModel.count) {
-                const file = resultsModel.get(currentIndex).filePath
+            if (currentIndex >= 0 && currentIndex < backend.burstProxy.count) {
+                const file = backend.burstProxy.get(currentIndex).filePath
                 
                 viewerWindow.currentFilePath = file;
                 
@@ -248,7 +254,7 @@ Window {
                 
                 viewerImage.source = ""
                 viewerImage.source = "image://full/" + encodeURIComponent(file)
-                title = "Viewer - " + resultsModel.get(currentIndex).fileName
+                title = "Viewer - " + backend.burstProxy.get(currentIndex).fileName
                 
                 let meta = backend.getPhotoMetadata(encodeURIComponent(file));
                 exifInfo = meta.infoText;
@@ -367,8 +373,8 @@ Window {
 
                     StyledButton {
                         text: "Next ->"
-                        onClicked: if (viewerWindow.currentIndex < resultsModel.count - 1) viewerWindow.currentIndex++
-                        enabled: viewerWindow.currentIndex < resultsModel.count - 1
+                        onClicked: if (viewerWindow.currentIndex < backend.burstProxy.count - 1) viewerWindow.currentIndex++
+                        enabled: viewerWindow.currentIndex < backend.burstProxy.count - 1
                     }
                 }
 
@@ -470,7 +476,7 @@ Window {
         }
 
         Shortcut { sequence: "Left"; onActivated: if (viewerWindow.currentIndex > 0) viewerWindow.currentIndex-- }
-        Shortcut { sequence: "Right"; onActivated: if (viewerWindow.currentIndex < resultsModel.count - 1) viewerWindow.currentIndex++ }
+        Shortcut { sequence: "Right"; onActivated: if (viewerWindow.currentIndex < backend.burstProxy.count - 1) viewerWindow.currentIndex++ }
         Shortcut { sequence: "Escape"; onActivated: viewerWindow.close() }
         Shortcut { 
             sequence: "Delete" 
@@ -700,7 +706,7 @@ Window {
 
                 GridView {
                     anchors.fill: parent
-                    model: resultsModel
+                    model: backend.burstProxy
                     clip: true
                     cellWidth: 220
                     cellHeight: 260
@@ -718,9 +724,9 @@ Window {
 
                     delegate: Rectangle {
                         property bool shouldShow: !mainWindow.groupBursts || model.isLead || model.isExpanded
-                        width: shouldShow ? 200 : 0
-                        height: shouldShow ? 240 : 0
-                        visible: shouldShow
+                        width: 200
+                        height: 240
+                        visible: true
                         color: model.status === "WAITING" ? cardWaitingBg : (model.isRejected ? cardBlurryBg : cardSharpBg)
                         radius: 6
                         border.color: model.status === "WAITING" ? cardWaitingBorder : (model.isRejected ? cardBlurryBorder : cardSharpBorder)
@@ -823,7 +829,7 @@ Window {
 
                 ListView {
                     anchors.fill: parent
-                    model: resultsModel
+                    model: backend.burstProxy
                     clip: true
                     spacing: 4
                     visible: !isGridView
@@ -841,8 +847,8 @@ Window {
                     delegate: Rectangle {
                         property bool shouldShow: !mainWindow.groupBursts || model.isLead || model.isExpanded
                         width: ListView.view.width
-                        height: shouldShow ? 60 : 0
-                        visible: shouldShow
+                        height: 60
+                        visible: true
                         color: model.status === "WAITING" ? cardWaitingBg : (model.isRejected ? cardBlurryBg : cardSharpBg)
                         radius: 4
                         border.color: model.status === "WAITING" ? cardWaitingBorder : (model.isRejected ? cardBlurryBorder : cardSharpBorder)

@@ -5,6 +5,8 @@
 #include <QString>
 #include <QVariantList>
 #include <QAbstractListModel>
+#include <QSortFilterProxyModel>
+
 #include <atomic>
 #include <thread>
 #include <vector>
@@ -119,6 +121,88 @@ private:
 };
 
 
+class BurstFilterProxyModel : public QSortFilterProxyModel {
+    Q_OBJECT
+    Q_PROPERTY(QObject* source READ source WRITE setSource NOTIFY sourceChanged)
+    Q_PROPERTY(bool groupBursts READ groupBursts WRITE setGroupBursts NOTIFY groupBurstsChanged)
+    Q_PROPERTY(int count READ count NOTIFY countChanged)
+
+public:
+    explicit BurstFilterProxyModel(QObject* parent = nullptr) : QSortFilterProxyModel(parent) {
+        setDynamicSortFilter(true);
+    }
+
+    QObject* source() const { return m_source; }
+    void setSource(QObject* source) {
+        if (m_source != source) {
+            m_source = source;
+            setSourceModel(qobject_cast<QAbstractItemModel*>(source));
+            if (sourceModel()) {
+                connect(sourceModel(), &QAbstractItemModel::rowsInserted, this, [this](){ emit countChanged(); });
+                connect(sourceModel(), &QAbstractItemModel::rowsRemoved, this, [this](){ emit countChanged(); });
+                connect(sourceModel(), &QAbstractItemModel::modelReset, this, [this](){ emit countChanged(); });
+            }
+            emit sourceChanged();
+            emit countChanged();
+        }
+    }
+
+    bool groupBursts() const { return m_groupBursts; }
+    void setGroupBursts(bool group) {
+        if (m_groupBursts != group) {
+            m_groupBursts = group;
+            invalidateFilter();
+            emit groupBurstsChanged();
+            emit countChanged();
+        }
+    }
+
+    int count() const { return rowCount(); }
+
+    // Replicate QML's ListModel.get(index) so our Viewer window still works
+    Q_INVOKABLE QVariantMap get(int row) const {
+        QVariantMap map;
+        QModelIndex idx = index(row, 0);
+        if (!idx.isValid()) return map;
+        QHash<int, QByteArray> roles = roleNames();
+        for (auto it = roles.begin(); it != roles.end(); ++it) {
+            map.insert(QString::fromUtf8(it.value()), data(idx, it.key()));
+        }
+        return map;
+    }
+
+    // Map the visible proxy index back to the true source list
+    Q_INVOKABLE int mapToSourceRow(int proxyRow) const {
+        return mapToSource(index(proxyRow, 0)).row();
+    }
+
+protected:
+    bool filterAcceptsRow(int source_row, const QModelIndex& source_parent) const override {
+        if (!m_groupBursts) return true;
+
+        QModelIndex idx = sourceModel()->index(source_row, 0, source_parent);
+        
+        if (m_isLeadRole == -1) m_isLeadRole = roleNames().key("isLead", -1);
+        if (m_isExpandedRole == -1) m_isExpandedRole = roleNames().key("isExpanded", -1);
+
+        bool isLead = (m_isLeadRole != -1) ? sourceModel()->data(idx, m_isLeadRole).toBool() : true;
+        bool isExpanded = (m_isExpandedRole != -1) ? sourceModel()->data(idx, m_isExpandedRole).toBool() : true;
+
+        return isLead || isExpanded; // Keep it if it's a leader, OR if the group was expanded
+    }
+
+signals:
+    void sourceChanged();
+    void groupBurstsChanged();
+    void countChanged();
+
+private:
+    QObject* m_source = nullptr;
+    bool m_groupBursts = true;
+    mutable int m_isLeadRole = -1;
+    mutable int m_isExpandedRole = -1;
+};
+
 class AppBackend : public QObject {
     Q_OBJECT
     
@@ -147,6 +231,9 @@ public:
     Q_INVOKABLE QVariantMap getPhotoMetadata(const QString& filePath);
     Q_INVOKABLE int getPhotoRating(const QString& filePath);
     Q_INVOKABLE void setPhotoRating(const QString& filePath, int rating);
+
+    Q_PROPERTY(BurstFilterProxyModel* burstProxy READ burstProxy CONSTANT)
+    BurstFilterProxyModel* burstProxy() { return &m_burstProxy; }
 
     void updateHistogramFromImage(const QImage& image);
     QString histogramBase64() const { return m_histogramBase64; }
@@ -217,6 +304,7 @@ private:
     int m_rawAnalysisMode = 0;
 
     bool m_groupBursts = true;
+    BurstFilterProxyModel m_burstProxy;
 
     void setStatusText(const QString &text);
     void setProgress(int value);
