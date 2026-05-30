@@ -722,107 +722,120 @@ Window {
                         }
                     }
 
-                    delegate: Rectangle {
-                        property bool shouldShow: !mainWindow.groupBursts || model.isLead || model.isExpanded
-                        width: 200
-                        height: 240
-                        visible: true
-                        color: model.status === "WAITING" ? cardWaitingBg : (model.isRejected ? cardBlurryBg : cardSharpBg)
-                        radius: 6
-                        border.color: model.status === "WAITING" ? cardWaitingBorder : (model.isRejected ? cardBlurryBorder : cardSharpBorder)
-                        border.width: 1
+                    delegate: Item {
+                        width: 220  // Matches cellWidth
+                        height: 260 // Matches cellHeight
 
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: {
-                                viewerWindow.currentIndex = index
-                                viewerWindow.show()
-                            }
-                        }
-
-                        ColumnLayout {
-                            anchors.fill: parent
-                            anchors.margins: 8
-                            spacing: 5
-
-                            Image {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 160
-                                source: "image://preview/" + model.filePath
-                                asynchronous: true
-                                fillMode: Image.PreserveAspectFit
-
-                                Rectangle {
-                                    anchors.fill: parent
-                                    color: "black"
-                                    z: -1
-                                }
-                            }
-
-                            Text {
-                                text: model.fileName
-                                color: textColor
-                                font.pixelSize: 12
-                                Layout.fillWidth: true
-                                elide: Text.ElideRight
-                            }
-
-                            Text {
-                                text: {
-                                    if (model.status === "WAITING") return "Waiting...";
-                                    if (model.isRejected) return "Rejected: " + model.rejectReason;
-                                    return "Score: " + model.score;
-                                }
-                                color: model.status === "WAITING" ? cardWaitingText : (model.isRejected ? cardBlurryText : cardSharpText)
-                                font.bold: true
-                                font.pixelSize: 12
-                            }
-                        }
-
+                        // --- THE SEAMLESS BATCH FRAME ---
                         Rectangle {
-                            visible: mainWindow.groupBursts && model.isLead && model.groupCount > 1
-                            anchors.top: parent.top
-                            anchors.right: parent.right
-                            anchors.margins: 8
-                            width: 32
-                            height: 32
-                            radius: 16
-                            color: "#0066cc"
-                            border.color: "#ffffff"
-                            border.width: 2
-                            z: 10
+                            anchors.fill: parent
+                            // A soft blue background to group them
+                            color: isLight ? "#d0e8ff" : "#004191" 
+                            visible: mainWindow.groupBursts && model.isExpanded && model.groupCount > 1
+                        }
 
-                            Text {
-                                anchors.centerIn: parent
-                                // Show "<" if expanded, otherwise "+X"
-                                text: model.isExpanded ? "<" : ("+" + (model.groupCount - 1))
-                                color: "white"
-                                font.bold: true
-                                font.pixelSize: 14
-                            }
+                        // --- THE ACTUAL CARD ---
+                        Rectangle {
+                            width: 200
+                            height: 240
+                            anchors.centerIn: parent // Centers the card inside the 220x260 cell
                             
-                            // Make it clickable!
+                            color: model.status === "WAITING" ? cardWaitingBg : (model.isRejected ? cardBlurryBg : cardSharpBg)
+                            radius: 6
+                            border.color: model.status === "WAITING" ? cardWaitingBorder : (model.isRejected ? cardBlurryBorder : cardSharpBorder)
+                            border.width: 1
+
                             MouseArea {
                                 anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
                                 onClicked: {
-                                    mainWindow.toggleGroupExpansion(index)
+                                    viewerWindow.currentIndex = index
+                                    viewerWindow.show()
                                 }
                             }
-                        }
 
-                        Rectangle {
-                            visible: mainWindow.groupBursts && !model.isLead
-                            anchors.top: parent.top
-                            anchors.left: parent.left
-                            anchors.margins: 8
-                            width: 20
-                            height: 20
-                            radius: 10
-                            color: "transparent"
-                            border.color: isLight ? "#888888" : "#aaaaaa"
-                            border.width: 2
-                            z: 10
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: 8
+                                spacing: 5
+
+                                Image {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 160
+                                    source: "image://preview/" + model.filePath
+                                    asynchronous: true
+                                    fillMode: Image.PreserveAspectFit
+
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        color: "black"
+                                        z: -1
+                                    }
+                                }
+
+                                Text {
+                                    text: model.fileName
+                                    color: textColor
+                                    font.pixelSize: 12
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideRight
+                                }
+
+                                Text {
+                                    text: {
+                                        if (model.status === "WAITING") return "Waiting...";
+                                        if (model.isRejected) return "Rejected: " + model.rejectReason;
+                                        return "Score: " + model.score;
+                                    }
+                                    color: model.status === "WAITING" ? cardWaitingText : (model.isRejected ? cardBlurryText : cardSharpText)
+                                    font.bold: true
+                                    font.pixelSize: 12
+                                }
+                            }
+
+                            // BADGE
+                            Rectangle {
+                                visible: mainWindow.groupBursts && model.isLead && model.groupCount > 1
+                                anchors.top: parent.top
+                                anchors.right: parent.right
+                                anchors.margins: 8
+                                width: 32
+                                height: 32
+                                radius: 16
+                                color: "#0066cc"
+                                border.color: "#ffffff"
+                                border.width: 2
+                                z: 10
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: model.isExpanded ? "<" : ("+" + (model.groupCount - 1))
+                                    color: "white"
+                                    font.bold: true
+                                    font.pixelSize: 14
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    preventStealing: true
+                                    propagateComposedEvents: false
+                                    onClicked: mainWindow.toggleGroupExpansion(index)
+                                }
+                            }
+
+                            // CHILD RINGS
+                            Rectangle {
+                                visible: mainWindow.groupBursts && !model.isLead
+                                anchors.top: parent.top
+                                anchors.left: parent.left
+                                anchors.margins: 8
+                                width: 20
+                                height: 20
+                                radius: 10
+                                color: "transparent"
+                                border.color: isLight ? "#888888" : "#aaaaaa"
+                                border.width: 2
+                                z: 10
+                            }
                         }
                     }
                 }
@@ -844,62 +857,75 @@ Window {
                         }
                     }
 
-                    delegate: Rectangle {
-                        property bool shouldShow: !mainWindow.groupBursts || model.isLead || model.isExpanded
+                                        delegate: Item {
                         width: ListView.view.width
-                        height: 60
-                        visible: true
-                        color: model.status === "WAITING" ? cardWaitingBg : (model.isRejected ? cardBlurryBg : cardSharpBg)
-                        radius: 4
-                        border.color: model.status === "WAITING" ? cardWaitingBorder : (model.isRejected ? cardBlurryBorder : cardSharpBorder)
-                        border.width: 1
+                        height: 68 // 60 for the card + 8 for spacing
 
-                        MouseArea {
+                        // --- THE SEAMLESS BATCH FRAME ---
+                        Rectangle {
                             anchors.fill: parent
-                            onClicked: {
-                                viewerWindow.currentIndex = index
-                                viewerWindow.show()
-                            }
+                            color: isLight ? "#d0e8ff" : "#004191"
+                            visible: mainWindow.groupBursts && model.isExpanded && model.groupCount > 1
                         }
 
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.margins: 5
-                            spacing: 15
+                        // --- THE ACTUAL CARD ---
+                        Rectangle {
+                            width: parent.width - 16
+                            height: 60
+                            anchors.centerIn: parent
+                            
+                            color: model.status === "WAITING" ? cardWaitingBg : (model.isRejected ? cardBlurryBg : cardSharpBg)
+                            radius: 4
+                            border.color: model.status === "WAITING" ? cardWaitingBorder : (model.isRejected ? cardBlurryBorder : cardSharpBorder)
+                            border.width: 1
 
-                            Image {
-                                Layout.preferredWidth: 70
-                                Layout.preferredHeight: 50
-                                source: "image://preview/" + model.filePath
-                                asynchronous: true
-                                fillMode: Image.PreserveAspectFit
-
-                                Rectangle {
-                                    anchors.fill: parent
-                                    color: "black"
-                                    z: -1
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: {
+                                    viewerWindow.currentIndex = index
+                                    viewerWindow.show()
                                 }
                             }
 
-                            Text {
-                                text: model.fileName
-                                color: textColor
-                                font.pixelSize: 14
-                                Layout.fillWidth: true
-                                elide: Text.ElideRight
-                            }
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.margins: 5
+                                spacing: 15
 
-                            Text {
-                                text: {
-                                    if (model.status === "WAITING") return "Waiting...";
-                                    if (model.isRejected) return "Rejected: " + model.rejectReason;
-                                    return "Score: " + model.score;
+                                Image {
+                                    Layout.preferredWidth: 70
+                                    Layout.preferredHeight: 50
+                                    source: "image://preview/" + model.filePath
+                                    asynchronous: true
+                                    fillMode: Image.PreserveAspectFit
+
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        color: "black"
+                                        z: -1
+                                    }
                                 }
-                                color: model.status === "WAITING" ? cardWaitingText : (model.isRejected ? cardBlurryText : cardSharpText)
-                                font.bold: true
-                                font.pixelSize: 14
-                                Layout.alignment: Qt.AlignRight
-                                Layout.rightMargin: 10
+
+                                Text {
+                                    text: model.fileName
+                                    color: textColor
+                                    font.pixelSize: 14
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideRight
+                                }
+
+                                Text {
+                                    text: {
+                                        if (model.status === "WAITING") return "Waiting...";
+                                        if (model.isRejected) return "Rejected: " + model.rejectReason;
+                                        return "Score: " + model.score;
+                                    }
+                                    color: model.status === "WAITING" ? cardWaitingText : (model.isRejected ? cardBlurryText : cardSharpText)
+                                    font.bold: true
+                                    font.pixelSize: 14
+                                    Layout.alignment: Qt.AlignRight
+                                    Layout.rightMargin: 10
+                                }
                             }
                         }
                     }
