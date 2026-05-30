@@ -24,8 +24,11 @@
 
 #include "tools/XMP_tools.h"  
 #include "tools/scan.h"
+#include "img_tools/bmp.h"
+#include "gui/utils/path_utils.h"
 #include "pipeline/interfaces.h"
 #include "pipeline/runner.h"
+
 #include "loaders/bmp_loader.h"
 #include "processors/laplacian_focus.h"
 #include "processors/state_cache.h"
@@ -33,17 +36,19 @@
 #include "processors/aesthetic_scorer.h"
 #include "processors/exposure_check.h"
 #include "postprocessors/state_cache.h"
-#include "img_tools/bmp.h"
-#include "gui/utils/path_utils.h"
+#include "processors/visual_hash.h"
+
 
 PipelineRunner AppBackend::createPipeline() {
     PipelineRunner runner;
     runner.setLoader(std::make_unique<DefaultImageLoader>());
     
-    // Always add state cache first (infrastructure)
+    // Always add state cache and Hash first (infrastructure)
     runner.addProcessor(std::make_unique<StateCacheProcessor>());
+    runner.addProcessor(std::make_unique<VisualHashProcessor>());
 
     // Dynamically add processors based on user configuration
+    runner.addProcessor(std::make_unique<StateCacheProcessor>());
     const auto& steps = m_pipelineModel.getSteps();
     for (const auto& step : steps) {
         if (!step.enabled) continue;
@@ -540,6 +545,7 @@ void AppBackend::loadSettings() {
                     else if (key == "cacheLaplacian") m_cacheLaplacian = (value == "1");
                     else if (key == "rawViewMode") m_rawViewMode = std::stoi(value);
                     else if (key == "rawAnalysisMode") m_rawAnalysisMode = std::stoi(value);
+                    else if (key == "groupBursts") m_groupBursts = (value == "1");
                     else if (key == "pipeline") {
                         m_pipelineModel.clear();
                         std::istringstream pStream(value);
@@ -595,6 +601,7 @@ void AppBackend::saveSettings() {
     out << "cacheLaplacian=" << (m_cacheLaplacian ? 1 : 0) << "\n";
     out << "rawViewMode=" << m_rawViewMode << "\n";
     out << "rawAnalysisMode=" << m_rawAnalysisMode << "\n";
+    out << "groupBursts=" << (m_groupBursts ? 1 : 0) << "\n";
     out << "pipeline=";
     const auto& steps = m_pipelineModel.getSteps();
     for (size_t i = 0; i < steps.size(); ++i) {
@@ -635,6 +642,7 @@ void AppBackend::selectFolder(const QString &folderPath) {
     
     // 1. FAST SCAN DIRECTORY IMMEDIATELY
     m_files = Scanner::scanFiles(m_currentFolder.toStdString());
+    m_hashes.assign(m_files.size(), 0);
     setTotalFiles(static_cast<int>(m_files.size()));
     setProgress(0);
     
@@ -693,13 +701,28 @@ void AppBackend::runScannerTask() {
                 if (result.success) {
                     int w = 0, h = 0;
                     ImageIO::readOriginalSize(file, w, h);
-                    // Try to find the AI score in the metrics if it ran
                     float aestheticScore = 0.0f;
+                    uint64_t currentHash = 0;
+
                     for (const auto& metric : result.metrics) {
-                        if (metric.key == "aesthetic_score" && std::holds_alternative<double>(metric.value)) {
-                            aestheticScore = static_cast<float>(std::get<double>(metric.value));
+                        QString key = QString::fromStdString(metric.key).toLower();
+                        if (key == "aesthetic score" || key == "ai score" || key == "score") {
+                            if (std::holds_alternative<double>(metric.value)) aestheticScore = static_cast<float>(std::get<double>(metric.value));
+                            else if (std::holds_alternative<int>(metric.value)) aestheticScore = static_cast<float>(std::get<int>(metric.value));
+                        }
+                        if (key == "visual_hash" && std::holds_alternative<std::string>(metric.value)) {
+                        std::string hashStr = std::get<std::string>(metric.value);
+                        try {
+                            currentHash = std::stoull(hashStr, nullptr, 16);
+                            qDebug() << "Extracted hash:" << QString::fromStdString(hashStr) << "for" << QString::fromStdString(file);
+                        } catch (...) {
+                            currentHash = 0;
                         }
                     }
+                }
+
+                // Store hash in the thread-safe array
+                m_hashes[idx] = currentHash;
                 
                     // For Laplacian backwards compatibility, if it's blurry, mark as rejected
                     if (result.isBlurry && !result.rejected) {
@@ -723,6 +746,40 @@ void AppBackend::runScannerTask() {
         if (worker.joinable()) worker.join();
     }
 
+    int lastLead = 0;
+    std::vector<int> groupLead(m_files.size(), 0);
+    std::vector<int> groupSize(m_files.size(), 1);
+
+    for (size_t i = 0; i < m_files.size(); ++i) {
+        if (i == 0 || m_hashes[i] == 0 || m_hashes[lastLead] == 0) {
+            lastLead = static_cast<int>(i);
+            groupLead[i] = static_cast<int>(i);
+        } else {
+            // Compute Hamming Distance (number of differing bits)
+            uint64_t xor_val = m_hashes[i] ^ m_hashes[lastLead];
+            int dist = 0;
+            while (xor_val) { dist += xor_val & 1; xor_val >>= 1; }
+
+            // Threshold: 10 bits difference means ~15% visual change. 
+            // This groups highly similar bursts together.
+            if (dist <= 20) {
+                groupLead[i] = lastLead;
+                groupSize[lastLead]++;
+                qDebug() << "Grouped photo" << i << "with lead" << lastLead << "Dist:" << dist;
+            } else {
+                lastLead = static_cast<int>(i);
+                groupLead[i] = static_cast<int>(i);
+                qDebug() << "New group lead at" << i << "Dist was:" << dist;
+            }
+        }
+    }
+
+    // Emit assignments back to QML safely
+    for (size_t i = 0; i < m_files.size(); ++i) {
+        bool isLead = (groupLead[i] == static_cast<int>(i));
+        emit groupAssigned(static_cast<int>(i), groupLead[i], isLead, groupSize[groupLead[i]]);
+    }
+
     m_isScanning = false;
     setStatusText(m_cancelRequested ? "Cancelled" : "Finished");
     emit scanFinished();
@@ -741,11 +798,21 @@ QString AppBackend::statusText() const { return m_statusText; }
 void AppBackend::setStatusText(const QString &text) {
     if (m_statusText != text) { m_statusText = text; emit statusTextChanged(); }
 }
+
 int AppBackend::progress() const { return m_progress; }
 void AppBackend::setProgress(int value) {
     if (m_progress != value) { m_progress = value; emit progressChanged(); }
 }
+
 int AppBackend::totalFiles() const { return m_totalFiles; }
 void AppBackend::setTotalFiles(int value) {
     if (m_totalFiles != value) { m_totalFiles = value; emit totalFilesChanged(); }
+}
+
+void AppBackend::setGroupBursts(bool group) {
+    if (m_groupBursts != group) {
+        m_groupBursts = group;
+        saveSettings();
+        emit groupBurstsChanged();
+    }
 }

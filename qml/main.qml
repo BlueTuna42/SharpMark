@@ -31,6 +31,7 @@ Window {
 
     property bool isGridView: true
     property bool pipelineVisible: false // Property for the left sidebar
+    property bool groupBursts: backend.groupBursts
 
     component StyledButton : Button {
         id: control
@@ -79,24 +80,35 @@ Window {
 
     Connections {
         target: backend
+
         function onFileFound(fileName, filePath, index) {
-        resultsModel.append({
-            fileName: fileName,
-            filePath: filePath,
-            isRejected: false, 
-            rejectReason: "",
-            score: "0.00",
-            status: "WAITING"
-        })
-    }
-        function onFileProcessed(index, isRejected, rejectReason, aestheticScore, width, height) {
-        if (index >= 0 && index < resultsModel.count) {
-            resultsModel.setProperty(index, "isRejected", isRejected)
-            resultsModel.setProperty(index, "rejectReason", rejectReason)
-            resultsModel.setProperty(index, "score", aestheticScore.toFixed(2))
-            resultsModel.setProperty(index, "status", isRejected ? "REJECTED" : "ACCEPTED")
+            resultsModel.append({
+                fileName: fileName,
+                filePath: filePath,
+                isRejected: false,
+                rejectReason: "",
+                score: "0.00",
+                status: "WAITING",
+                isLead: true,  
+                groupCount: 1  
+            })
         }
-    }
+
+        function onFileProcessed(index, isRejected, rejectReason, aestheticScore, width, height) {
+            if (index >= 0 && index < resultsModel.count) {
+                resultsModel.setProperty(index, "isRejected", isRejected)
+                resultsModel.setProperty(index, "rejectReason", rejectReason)
+                resultsModel.setProperty(index, "score", aestheticScore.toFixed(2))
+                resultsModel.setProperty(index, "status", isRejected ? "REJECTED" : "ACCEPTED")
+            }
+        }
+
+        function onGroupAssigned(index, leadIndex, isLead, groupSize) {
+            if (index >= 0 && index < resultsModel.count) {
+                resultsModel.setProperty(index, "isLead", isLead)
+                resultsModel.setProperty(index, "groupCount", groupSize)
+            }
+        }
     }
 
     FolderDialog {
@@ -498,25 +510,23 @@ Window {
                     Layout.fillHeight: true
                     clip: true
                     spacing: 5
-
                     model: DelegateModel {
                         id: visualModel
                         model: backend.pipelineModel
-                        
                         delegate: DropArea {
                             id: delegateRoot
                             width: ListView.view.width
                             height: 45
                             keys: ["step"]
-                            
+
                             property int visualIndex: DelegateModel.itemsIndex
-                            
+
                             onEntered: (drag) => {
-                                let from = drag.source.visualIndex;
-                                let to = delegateRoot.visualIndex;
+                                let from = drag.source.visualIndex
+                                let to = delegateRoot.visualIndex
                                 if (from !== to) {
-                                    visualModel.items.move(from, to);
-                                    backend.pipelineModel.moveStep(from, to);
+                                    visualModel.items.move(from, to)
+                                    backend.pipelineModel.moveStep(from, to)
                                 }
                             }
 
@@ -544,14 +554,12 @@ Window {
                                     Item {
                                         width: 24
                                         height: parent.height
-                                        
                                         Text {
                                             anchors.centerIn: parent
                                             text: "≡"
                                             color: isLight ? "#888" : "#666"
                                             font.pixelSize: 18
                                         }
-                                        
                                         MouseArea {
                                             id: dragArea
                                             anchors.fill: parent
@@ -563,7 +571,7 @@ Window {
                                     CheckBox {
                                         checked: model.enabled
                                         onCheckedChanged: {
-                                            backend.pipelineModel.setStepEnabled(model.index, checked);
+                                            backend.pipelineModel.setStepEnabled(model.index, checked)
                                         }
                                     }
 
@@ -585,12 +593,39 @@ Window {
                                 ]
                             }
                         }
+                    } 
+                } 
+
+                
+                Item { 
+                    Layout.fillHeight: true 
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 1
+                    color: popupBorder
+                }
+
+                CheckBox {
+                    text: "Group Burst Photos"
+                    checked: mainWindow.groupBursts
+                    onCheckedChanged: {
+                        mainWindow.groupBursts = checked
+                        backend.groupBursts = checked
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        color: textColor
+                        font.pixelSize: 14
+                        verticalAlignment: Text.AlignVCenter
+                        leftPadding: parent.indicator.width + parent.spacing
                     }
                 }
             }
-        }
+        } 
 
-        // RIGHT SIDE (Main Content)
+                // RIGHT SIDE Main Content
         ColumnLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -600,35 +635,51 @@ Window {
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 10
-                
-                StyledButton { 
-                    text: mainWindow.pipelineVisible ? "◀ Hide Pipeline" : "▶ Show Pipeline"
-                    onClicked: mainWindow.pipelineVisible = !mainWindow.pipelineVisible 
+
+                StyledButton {
+                    text: mainWindow.pipelineVisible ? "Hide Pipeline" : "Show Pipeline"
+                    onClicked: mainWindow.pipelineVisible = !mainWindow.pipelineVisible
                 }
-                
-                StyledButton { text: "Open Folder"; onClicked: folderDialog.open() }
-                StyledButton { text: "Start Scan"; isPrimary: true; onClicked: backend.startScan() }
-                StyledButton { text: "Cancel"; onClicked: backend.cancelScan() }
-                
-                Rectangle { width: 1; height: 20; color: popupBorder; Layout.margins: 5 }
-                
-                StyledButton { 
-                    text: isGridView ? "View: Mosaic" : "View: List" 
+                StyledButton {
+                    text: "Open Folder"
+                    onClicked: folderDialog.open()
+                }
+                StyledButton {
+                    text: "Start Scan"
+                    isPrimary: true
+                    onClicked: backend.startScan()
+                }
+                StyledButton {
+                    text: "Cancel"
+                    onClicked: backend.cancelScan()
+                }
+                Rectangle {
+                    width: 1
+                    height: 20
+                    color: popupBorder
+                    Layout.margins: 5
+                }
+                StyledButton {
+                    text: isGridView ? "View Mosaic" : "View List"
                     onClicked: isGridView = !isGridView
                 }
-                
-                StyledButton { 
+                StyledButton {
                     text: "Settings"
-                    onClicked: settingsPopup.open() 
+                    onClicked: settingsPopup.open()
                 }
-                
-                Item { Layout.fillWidth: true } 
-                Text { text: backend.statusText; color: textColor; font.pixelSize: 16 }
+                Item { Layout.fillWidth: true }
+                Text {
+                    text: backend.statusText
+                    color: textColor
+                    font.pixelSize: 16
+                }
             }
 
             ProgressBar {
                 Layout.fillWidth: true
-                from: 0; to: backend.totalFiles; value: backend.progress
+                from: 0
+                to: backend.totalFiles
+                value: backend.progress
                 visible: backend.totalFiles > 0
             }
 
@@ -640,21 +691,24 @@ Window {
                     anchors.fill: parent
                     model: resultsModel
                     clip: true
-                    cellWidth: 220; cellHeight: 260
+                    cellWidth: 220
+                    cellHeight: 260
                     visible: isGridView
 
                     ScrollBar.vertical: ScrollBar {
                         active: true
                         policy: ScrollBar.AsNeeded
                         contentItem: Rectangle {
-                        implicitWidth: 8
-                        radius: 4
-                        color: isLight ? "#999999" : "#666666"
+                            implicitWidth: 8
+                            radius: 4
+                            color: isLight ? "#999999" : "#666666"
+                        }
                     }
-            }
 
                     delegate: Rectangle {
-                        width: 200; height: 240
+                        width: (mainWindow.groupBursts && !model.isLead) ? 0 : 200
+                        height: (mainWindow.groupBursts && !model.isLead) ? 0 : 240
+                        visible: !(mainWindow.groupBursts && !model.isLead)
                         color: model.status === "WAITING" ? cardWaitingBg : (model.isRejected ? cardBlurryBg : cardSharpBg)
                         radius: 6
                         border.color: model.status === "WAITING" ? cardWaitingBorder : (model.isRejected ? cardBlurryBorder : cardSharpBorder)
@@ -663,8 +717,8 @@ Window {
                         MouseArea {
                             anchors.fill: parent
                             onClicked: {
-                                viewerWindow.currentIndex = index;
-                                viewerWindow.show();
+                                viewerWindow.currentIndex = index
+                                viewerWindow.show()
                             }
                         }
 
@@ -677,12 +731,23 @@ Window {
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 160
                                 source: "image://preview/" + model.filePath
-                                asynchronous: true 
+                                asynchronous: true
                                 fillMode: Image.PreserveAspectFit
-                                Rectangle { anchors.fill: parent; color: "black"; z: -1 }
+
+                                Rectangle {
+                                    anchors.fill: parent
+                                    color: "black"
+                                    z: -1
+                                }
                             }
 
-                            Text { text: model.fileName; color: textColor; font.pixelSize: 12; Layout.fillWidth: true; elide: Text.ElideRight }
+                            Text {
+                                text: model.fileName
+                                color: textColor
+                                font.pixelSize: 12
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                            }
 
                             Text {
                                 text: {
@@ -694,6 +759,42 @@ Window {
                                 font.bold: true
                                 font.pixelSize: 12
                             }
+                        }
+
+                        Rectangle {
+                            visible: mainWindow.groupBursts && model.isLead && model.groupCount > 1
+                            anchors.top: parent.top
+                            anchors.right: parent.right
+                            anchors.margins: 8
+                            width: 32
+                            height: 32
+                            radius: 16
+                            color: "#0066cc"
+                            border.color: "#ffffff"
+                            border.width: 2
+                            z: 10
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "+" + (model.groupCount - 1)
+                                color: "white"
+                                font.bold: true
+                                font.pixelSize: 12
+                            }
+                        }
+
+                        Rectangle {
+                            visible: mainWindow.groupBursts && !model.isLead
+                            anchors.top: parent.top
+                            anchors.left: parent.left
+                            anchors.margins: 8
+                            width: 20
+                            height: 20
+                            radius: 10
+                            color: "transparent"
+                            border.color: isLight ? "#888888" : "#aaaaaa"
+                            border.width: 2
+                            z: 10
                         }
                     }
                 }
@@ -709,24 +810,26 @@ Window {
                         active: true
                         policy: ScrollBar.AsNeeded
                         contentItem: Rectangle {
-                        implicitWidth: 8
-                        radius: 4
-                        color: isLight ? "#999999" : "#666666"
+                            implicitWidth: 8
+                            radius: 4
+                            color: isLight ? "#999999" : "#666666"
+                        }
                     }
-            }
 
                     delegate: Rectangle {
-                        width: ListView.view.width; height: 60
-                        color: model.status === "WAITING" ? cardWaitingBg : (model.isBlurry ? cardBlurryBg : cardSharpBg)
+                        width: ListView.view.width
+                        height: (mainWindow.groupBursts && !model.isLead) ? 0 : 60
+                        visible: !(mainWindow.groupBursts && !model.isLead)
+                        color: model.status === "WAITING" ? cardWaitingBg : (model.isRejected ? cardBlurryBg : cardSharpBg)
                         radius: 4
-                        border.color: model.status === "WAITING" ? cardWaitingBorder : (model.isBlurry ? cardBlurryBorder : cardSharpBorder)
+                        border.color: model.status === "WAITING" ? cardWaitingBorder : (model.isRejected ? cardBlurryBorder : cardSharpBorder)
                         border.width: 1
 
                         MouseArea {
                             anchors.fill: parent
                             onClicked: {
-                                viewerWindow.currentIndex = index;
-                                viewerWindow.show();
+                                viewerWindow.currentIndex = index
+                                viewerWindow.show()
                             }
                         }
 
@@ -736,19 +839,38 @@ Window {
                             spacing: 15
 
                             Image {
-                                Layout.preferredWidth: 70; Layout.preferredHeight: 50
+                                Layout.preferredWidth: 70
+                                Layout.preferredHeight: 50
                                 source: "image://preview/" + model.filePath
-                                asynchronous: true; fillMode: Image.PreserveAspectFit
-                                Rectangle { anchors.fill: parent; color: "black"; z: -1 }
+                                asynchronous: true
+                                fillMode: Image.PreserveAspectFit
+
+                                Rectangle {
+                                    anchors.fill: parent
+                                    color: "black"
+                                    z: -1
+                                }
                             }
 
-                            Text { text: model.fileName; color: textColor; font.pixelSize: 14; Layout.fillWidth: true; elide: Text.ElideRight }
+                            Text {
+                                text: model.fileName
+                                color: textColor
+                                font.pixelSize: 14
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                            }
 
-                            Text { 
-                                text: model.status === "WAITING" ? "Waiting for scan..." : (model.status + " (" + model.score + ")")
-                                color: model.status === "WAITING" ? cardWaitingText : (model.isBlurry ? cardBlurryText : cardSharpText)
-                                font.bold: true; font.pixelSize: 14
-                                Layout.alignment: Qt.AlignRight; Layout.rightMargin: 10
+                            Text {
+                                text: {
+                                    if (model.status === "WAITING") return "Waiting...";
+                                    if (model.isRejected) return "Rejected: " + model.rejectReason;
+                                    return "Score: " + model.score;
+                                }
+                                color: model.status === "WAITING" ? cardWaitingText : (model.isRejected ? cardBlurryText : cardSharpText)
+                                font.bold: true
+                                font.pixelSize: 14
+                                Layout.alignment: Qt.AlignRight
+                                Layout.rightMargin: 10
                             }
                         }
                     }

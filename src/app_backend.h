@@ -118,6 +118,7 @@ private:
     std::vector<Step> m_steps;
 };
 
+
 class AppBackend : public QObject {
     Q_OBJECT
     
@@ -133,6 +134,7 @@ class AppBackend : public QObject {
     Q_PROPERTY(int rawViewMode READ rawViewMode WRITE setRawViewMode NOTIFY rawViewModeChanged)
     Q_PROPERTY(int rawAnalysisMode READ rawAnalysisMode WRITE setRawAnalysisMode NOTIFY rawAnalysisModeChanged)
     Q_PROPERTY(QString histogramBase64 READ histogramBase64 NOTIFY histogramUpdated)
+    Q_PROPERTY(bool groupBursts READ groupBursts WRITE setGroupBursts NOTIFY groupBurstsChanged)
 
 public:
     explicit AppBackend(QObject *parent = nullptr);
@@ -169,6 +171,9 @@ public:
     int rawAnalysisMode() const; 
     void setRawAnalysisMode(int mode);
 
+    bool groupBursts() const { return m_groupBursts; }
+    void setGroupBursts(bool group);
+
     Q_PROPERTY(PipelineConfigModel* pipelineModel READ pipelineModel CONSTANT)
     PipelineConfigModel* pipelineModel() { return &m_pipelineModel; }
 
@@ -182,12 +187,15 @@ signals:
     void cacheLaplacianChanged();
     void rawViewModeChanged();
     void rawAnalysisModeChanged();
+
+    void groupBurstsChanged();
     
     void fileFound(const QString &fileName, const QString &filePath, int index);
     void fileProcessed(int index, bool isRejected, QString rejectReason, float aestheticScore, int width, int height);
     void scanFinished();
 
     void histogramUpdated();
+    void groupAssigned(int index, int leadIndex, bool isLead, int groupSize);
 
 private:
     QString m_statusText;
@@ -208,6 +216,8 @@ private:
     int m_rawViewMode = 0;
     int m_rawAnalysisMode = 0;
 
+    bool m_groupBursts = true;
+
     void setStatusText(const QString &text);
     void setProgress(int value);
     void setTotalFiles(int value);
@@ -218,6 +228,7 @@ private:
     QString getSettingsFilePath() const;
 
     QString m_histogramBase64;
+    std::vector<uint64_t> m_hashes;
 
     PipelineConfigModel m_pipelineModel;
 
