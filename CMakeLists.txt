@@ -147,9 +147,10 @@ endif()
 # ==========================================
 if(WIN32)
     # --- Windows Portable Deployment ---
-    if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-        set(CMAKE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/SharpMark_Portable" CACHE PATH "Portable Install Dir" FORCE)
-    endif()
+    set(CMAKE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/SharpMark_Portable" CACHE PATH "Portable Install Dir" FORCE)
+    #if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    #    set(CMAKE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/SharpMark_Portable" CACHE PATH "Portable Install Dir" FORCE)
+    #endif()
 
     # Tell vcpkg to automatically copy all sub-dependencies
     set(X_VCPKG_APPLOCAL_DEPS_INSTALL ON)
@@ -250,7 +251,7 @@ else()
     set(CPACK_GENERATOR "DEB")
     set(CPACK_PACKAGE_NAME "sharpmark") 
     set(CPACK_PACKAGE_VERSION "2.0.0-alpha.1")
-    set(CPACK_PACKAGE_CONTACT "BlueTuna <azimuthsouth5@gmail.com>") 
+    set(CPACK_PACKAGE_CONTACT "x") 
     set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Fast Image Sharpness Analyzer and Culling Tool")
     set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
     include(CPack)

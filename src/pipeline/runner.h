@@ -3,6 +3,8 @@
 #include <vector>
 #include <memory>
 #include <QDebug>
+#include <QString> 
+#include <exception>
 
 class PipelineRunner {
 private:
@@ -26,38 +28,67 @@ public:
         std::unique_ptr<GrayscaleImage> currentImage = nullptr;
         bool imageLoaded = false;
 
-        // Run the chain of Processors
-        for (auto& p : processors_) {
-            if (!p->supports(ctx)) continue;
+        // Wrap the ENTIRE pipeline in a try-catch block
+        try {
+            // Run the chain of Processors
+            for (auto& p : processors_) {
+                if (!p->supports(ctx)) continue;
 
-            if (result.rejected) break; 
+                if (result.rejected) break; 
 
-            // Try Cache
-            if (p->tryProcessFromCache(ctx, result)) {
-                result.processorsRun.push_back(p->name() + " (cached)");
-                continue;
-            }
+                // Try Cache
+                if (p->tryProcessFromCache(ctx, result)) {
+                    result.processorsRun.push_back(p->name() + " (cached)");
+                    continue;
+                }
 
-            if (!imageLoaded) {
-                currentImage = loader_->load(ctx);
-                imageLoaded = true;
-                if (!currentImage) {
-                    result.success = false;
-                    result.warnings.push_back("Failed to load image");
-                    break;
+                if (!imageLoaded) {
+                    currentImage = loader_->load(ctx);
+                    imageLoaded = true;
+                    if (!currentImage) {
+                        result.success = false;
+                        result.warnings.push_back("Failed to load image");
+                        break;
+                    }
+                }
+
+                // Execute processing
+                if (currentImage) {
+                    p->process(currentImage, ctx, result);
+                    result.processorsRun.push_back(p->name());
                 }
             }
 
-            // Execute processing
-            if (currentImage) {
-                p->process(currentImage, ctx, result);
-                result.processorsRun.push_back(p->name());
+            // Run multiple Post-processors
+            for (auto& pp : postProcessors_) {
+                pp->handle(ctx, result);
             }
-        }
 
-        // Run multiple Post-processors
-        for (auto& pp : postProcessors_) {
-            pp->handle(ctx, result);
+        } catch (const std::exception& e) {
+#ifdef _WIN32
+            QString safePath = QString::fromStdWString(ctx.filePath.wstring());
+#else
+            QString safePath = QString::fromStdString(ctx.filePath.string());
+#endif
+
+            qWarning() << "[Pipeline Fatal Error] on file:" << safePath << "Exception:" << e.what();
+            
+            result.success = false;
+            result.rejected = true;
+            result.warnings.push_back(std::string("Fatal C++ Exception: ") + e.what());
+            
+        } catch (...) {
+#ifdef _WIN32
+            QString safePath = QString::fromStdWString(ctx.filePath.wstring());
+#else
+            QString safePath = QString::fromStdString(ctx.filePath.string());
+#endif
+
+            qWarning() << "[Pipeline Fatal Error] Unknown exception on file:" << safePath;
+            
+            result.success = false;
+            result.rejected = true;
+            result.warnings.push_back("Fatal Unknown Exception occurred.");
         }
 
         return result;

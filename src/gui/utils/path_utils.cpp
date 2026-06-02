@@ -1,6 +1,8 @@
 #include "path_utils.h"
 #include <cstdlib>
 #include <filesystem>
+#include <QFileInfo>
+#include <QDir>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -37,17 +39,14 @@ std::filesystem::path get_app_config_dir() {
 #endif
 }
 
-std::string path_filename(const std::string& path) {
-    const std::filesystem::path fsPath(path);
-    const std::string filename = fsPath.filename().string();
-    return filename.empty() ? path : filename;
+QString path_filename(const QString& path) {
+    return QFileInfo(path).fileName();
 }
 
-std::string directory_name(const std::string& path) {
-    const std::filesystem::path fsPath(path);
-    std::string name = fsPath.filename().string();
-    if (name.empty() && fsPath.has_parent_path()) {
-        name = fsPath.parent_path().filename().string();
+QString directory_name(const QString& path) {
+    QFileInfo fi(path);
+    if (fi.isDir()) {
+        return fi.fileName();
     }
-    return name.empty() ? path : name;
+    return fi.dir().dirName();
 }

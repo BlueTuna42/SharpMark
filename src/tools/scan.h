@@ -2,11 +2,11 @@
 #define SCAN_H
 
 #include <vector>
-#include <string>
+#include <QString>
 
 class Scanner {
 public:
-    static std::vector<std::string> scanFiles(const std::string& path);
+    static std::vector<QString> scanFiles(const QString& path);
 };
 
 #endif

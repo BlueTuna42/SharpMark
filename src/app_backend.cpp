@@ -1,4 +1,5 @@
 #include "app_backend.h"
+
 #include <QDebug>
 #include <QFileInfo>
 #include <filesystem>
@@ -21,6 +22,7 @@
 #include <QBuffer>
 #include <QFile>
 #include <QTextStream>
+#include <QProcess>
 
 #include "tools/XMP_tools.h"  
 #include "tools/scan.h"
@@ -240,7 +242,11 @@ QVariantMap AppBackend::getPhotoMetadata(const QString& rawPath) {
     }
 
     // Recalculate AI score on the fly
-    std::filesystem::path imgPath(cleanPath.toStdString());
+    #ifdef Q_OS_WIN
+        std::filesystem::path imgPath(cleanPath.toStdWString());
+    #else
+        std::filesystem::path imgPath(cleanPath.toUtf8().constData());
+    #endif
     std::filesystem::path clipPath = imgPath.parent_path() / ".laplacian_cache" / (imgPath.filename().string() + ".clip");
 
     if (std::filesystem::exists(clipPath)) {
@@ -333,7 +339,11 @@ int AppBackend::getPhotoRating(const QString& rawPath) {
         }
     }
 
-    std::ifstream file(fileToRead.toStdString(), std::ios::binary);
+    #ifdef Q_OS_WIN
+        std::ifstream file(fileToRead.toStdWString(), std::ios::binary);
+    #else
+        std::ifstream file(fileToRead.toUtf8().constData(), std::ios::binary);
+    #endif
     if (file.is_open()) {
         const size_t bufferSize = 1024 * 1024; 
         std::string buffer;
@@ -368,79 +378,75 @@ int AppBackend::getPhotoRating(const QString& rawPath) {
 }
 
 void AppBackend::setPhotoRating(const QString& rawPath, int rating) {
-    if (rating < 0 || rating > 5) return; // Allow 0 to clear rating
+    if (rating < 0 || rating > 5) return; 
 
     QString cleanPath = QUrl::fromPercentEncoding(rawPath.toUtf8());
 #ifdef Q_OS_WIN
-    if (cleanPath.startsWith("file:///")) {
-        cleanPath = cleanPath.mid(8);
-    } else if (cleanPath.startsWith("/")) {
-        cleanPath = cleanPath.mid(1);
-    } else if (cleanPath.startsWith("file://")) {
-        cleanPath = cleanPath.mid(7);
-    }
+    if (cleanPath.startsWith("file:///")) cleanPath = cleanPath.mid(8);
+#else
+    if (cleanPath.startsWith("file://")) cleanPath = cleanPath.mid(7);
 #endif
 
     m_ratings[cleanPath] = rating;
     saveRatings();
 
-    if (m_writeExif) { 
+    if (m_writeExif) {
         QString exiftoolPath = QCoreApplication::applicationDirPath() + "/exiftool";
 #ifdef Q_OS_WIN
         exiftoolPath += ".exe";
 #endif
-        
+
         if (!QFileInfo::exists(exiftoolPath)) {
-            qDebug() << "CRITICAL ERROR: exiftool.exe NOT FOUND at" << exiftoolPath;
+            qDebug() << "CRITICAL ERROR: exiftool NOT FOUND at" << exiftoolPath;
             return;
         }
 
-        std::string exiftoolPathStd = exiftoolPath.toStdString();
-        
         QString targetPath = cleanPath;
         QFileInfo fi(cleanPath);
         QString ext = fi.suffix().toLower();
-        
         QStringList rawFormats = {"cr2", "cr3", "nef", "arw", "dng", "raf", "orf", "rw2", "pef", "srw"};
         if (rawFormats.contains(ext)) {
             targetPath = cleanPath + ".xmp";
         }
-        
-        std::string sourcePathStd = cleanPath.toStdString();
-        std::string targetPathStd = targetPath.toStdString();
 
-        std::thread([exiftoolPathStd, sourcePathStd, targetPathStd, rating]() {
-            int exitCode = XMPTools::writeXmpRating(exiftoolPathStd, sourcePathStd, targetPathStd, rating);
-            qDebug() << "DEBUG WRITE: ExifTool finished with exit code" << exitCode << "for" << QString::fromStdString(targetPathStd);
-        }).detach();
+        // Use QProcess: It is fully async, thread-safe, and natively handles Unicode on all OSes.
+        QStringList args;
+        args << "-rating=" + QString::number(rating)
+             << "-overwrite_original"
+             << targetPath;
+
+        QProcess::startDetached(exiftoolPath, args);
+        qDebug() << "DEBUG WRITE: ExifTool spawned for" << targetPath;
     }
 
-    if (rating == 0) return; // If we just cleared the rating, don't train
+    if (rating == 0) return; 
 
-    std::filesystem::path imgPath(cleanPath.toStdString());
-    std::filesystem::path clipPath = imgPath.parent_path() / ".laplacian_cache" / (imgPath.filename().string() + ".clip");
+    // Safe path construction for AI training
+    QFileInfo fi(cleanPath);
+    QString clipPath = fi.absolutePath() + "/.laplacian_cache/" + fi.fileName() + ".clip";
 
-    if (!std::filesystem::exists(clipPath)) {
-        qWarning() << "[AI Train] .clip vector NOT FOUND at:" << QString::fromStdString(clipPath.string());
+    if (!QFileInfo::exists(clipPath)) {
+        qWarning() << "AI Train: .clip vector NOT FOUND at" << clipPath;
         return;
     }
 
     std::vector<float> clipVector(512);
-    std::ifstream clipFile(clipPath, std::ios::binary);
-    if (clipFile.is_open()) {
+    QFile clipFile(clipPath);
+    if (clipFile.open(QIODevice::ReadOnly)) {
         clipFile.read(reinterpret_cast<char*>(clipVector.data()), 512 * sizeof(float));
         clipFile.close();
     } else {
-        qWarning() << "[AI Train] Failed to read .clip file!";
-        return; 
+        qWarning() << "AI Train: Failed to read .clip file!";
+        return;
     }
 
-    std::string exeDir = QCoreApplication::applicationDirPath().toStdString();
+    std::string exeDir = QCoreApplication::applicationDirPath().toUtf8().constData();
+    qDebug() << "AI Train Started for rating:" << rating;
     
-    qDebug() << "[AI Train] Started for rating:" << rating;
     AestheticScorer scorer(exeDir);
     scorer.train(clipVector, rating);
-    qDebug() << "[AI Train] Success! Weights saved to:" << QString::fromStdString(exeDir) + "/aesthetic_weights.bin";
+    
+    qDebug() << "AI Train Success! Weights saved.";
 }
 
 void AppBackend::updateHistogramFromImage(const QImage& src) {
@@ -629,28 +635,30 @@ void AppBackend::setRawAnalysisMode(int mode) { if (m_rawAnalysisMode != mode) {
 void AppBackend::selectFolder(const QString &folderPath) {
     if (m_isScanning) return;
 
-    QString cleanPath = folderPath;
-    if (cleanPath.startsWith("file:///")) {
+    QString cleanPath = QUrl::fromPercentEncoding(folderPath.toUtf8());
 #ifdef Q_OS_WIN
+    if (cleanPath.startsWith("file:///")) {
         cleanPath = cleanPath.mid(8);
-#else
-        cleanPath = cleanPath.mid(7);
-#endif
     }
+#else
+    if (cleanPath.startsWith("file://")) {
+        cleanPath = cleanPath.mid(7);
+    }
+#endif
+
     m_currentFolder = cleanPath;
-    setStatusText("Selected: " + m_currentFolder);
-    
+    setStatusText("Selected " + m_currentFolder);
+
     // 1. FAST SCAN DIRECTORY IMMEDIATELY
-    m_files = Scanner::scanFiles(m_currentFolder.toStdString());
+    m_files = Scanner::scanFiles(m_currentFolder);
     m_hashes.assign(m_files.size(), 0);
     setTotalFiles(static_cast<int>(m_files.size()));
     setProgress(0);
-    
+
     // 2. EMIT TO QML INSTANTLY
     for (size_t i = 0; i < m_files.size(); ++i) {
-        QString absolutePath = QString::fromStdString(m_files[i]);
-        QString fileName = QFileInfo(absolutePath).fileName();
-        emit fileFound(fileName, absolutePath, static_cast<int>(i));
+        QFileInfo fi(m_files[i]);
+        emit fileFound(fi.fileName(), m_files[i], static_cast<int>(i));
     }
 }
 
@@ -680,27 +688,28 @@ void AppBackend::runScannerTask() {
             PipelineRunner runner = this->createPipeline();
             AppSettings settings; 
 
-            while (!m_cancelRequested) {
-                size_t idx = fileIndex.fetch_add(1, std::memory_order_relaxed);
-                if (idx >= m_files.size()) break;
+                    while (!m_cancelRequested) {
+            size_t idx = fileIndex.fetch_add(1, std::memory_order_relaxed);
+            if (idx >= m_files.size()) break;
 
-                const std::string& file = m_files[idx];
+            const QString qFile = m_files[idx];
 
-                ProcessingContext ctx;
-                ctx.rawFilePath = file;
-                ctx.settings = settings;
+            ProcessingContext ctx;
+            ctx.settings = settings;
+
 #ifdef _WIN32
-                ctx.filePath = std::filesystem::u8path(file);
+            ctx.filePath = std::filesystem::path(qFile.toStdWString());
 #else
-                ctx.filePath = std::filesystem::path(file);
+            ctx.filePath = std::filesystem::path(qFile.toUtf8().constData());
 #endif
-                ctx.cacheDir = ctx.filePath.parent_path() / ".laplacian_cache";
+            ctx.rawFilePath = qFile.toUtf8().constData(); 
+            ctx.cacheDir = ctx.filePath.parent_path() / ".laplacian_cache";
 
-                ProcessingResult result = runner.run(ctx);
+            ProcessingResult result = runner.run(ctx);
 
-                if (result.success) {
-                    int w = 0, h = 0;
-                    ImageIO::readOriginalSize(file, w, h);
+            if (result.success) {
+                int w = 0, h = 0;
+                ImageIO::readOriginalSize(ctx.rawFilePath, w, h); 
                     float aestheticScore = 0.0f;
                     uint64_t currentHash = 0;
 

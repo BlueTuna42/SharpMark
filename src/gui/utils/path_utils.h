@@ -1,11 +1,11 @@
 #ifndef PATH_UTILS_H
 #define PATH_UTILS_H
 
-#include <string>
+#include <QString>
 #include <filesystem>
 
-std::string path_filename(const std::string& path);
-std::string directory_name(const std::string& path);
+QString path_filename(const QString& path);
+QString directory_name(const QString& path);
 std::filesystem::path get_app_config_dir();
 
 #endif

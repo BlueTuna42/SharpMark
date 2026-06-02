@@ -18,7 +18,6 @@
 #endif
 
 #include "tools/scan.h"
-#include "gui/gui.h"
 #include "pipeline/interfaces.h"
 #include "pipeline/runner.h"
 #include "gui/utils/path_utils.h"
@@ -34,42 +33,90 @@
 #include "postprocessors/state_cache.h"
 
 void customMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg) {
-    QFile outFile("sharpmark_debug.log");
-    outFile.open(QIODevice::WriteOnly | QIODevice::Append);
+    static QFile outFile("sharpmark_debug.log");
+    if (!outFile.isOpen()) {
+        outFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text);
+    }
+
     QTextStream ts(&outFile);
-    ts << QDateTime::currentDateTime().toString("hh:mm:ss.zzz ") << msg << "\n";
+    QString timeStr = QDateTime::currentDateTime().toString("hh:mm:ss.zzz");
+    
+    QString typeStr;
+    switch (type) {
+        case QtDebugMsg:    typeStr = "[DEBUG]   "; break;
+        case QtInfoMsg:     typeStr = "[INFO]    "; break;
+        case QtWarningMsg:  typeStr = "[WARNING] "; break;
+        case QtCriticalMsg: typeStr = "[CRITICAL]"; break;
+        case QtFatalMsg:    typeStr = "[FATAL]   "; break;
+    }
+
+    QString contextStr;
+    if (context.file && !QString(context.file).isEmpty()) {
+        QString file = QString(context.file).section('\\', -1).section('/', -1);
+        contextStr = QString("[%1:%2 %3] ").arg(file).arg(context.line).arg(context.function);
+    }
+
+    QString finalLog = QString("%1 %2 %3%4\n").arg(timeStr, typeStr, contextStr, msg);
+    
+    ts << finalLog;
+    ts.flush();
+    outFile.flush();
+    std::cerr << finalLog.toStdString();
+
+    if (type == QtFatalMsg) {
+        abort();
+    }
 }
 
+
 int main(int argc, char *argv[]) {
+    // Set environment variable so Qt provides file/line info even outside of debug mode
+    qputenv("QT_MESSAGE_PATTERN", "%{time hh:mm:ss.zzz} %{type} %{file}:%{line} %{function} - %{message}");
     qInstallMessageHandler(customMessageHandler); 
-    // Required for High DPI displays
-    QGuiApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
-    
-    QGuiApplication app(argc, argv);
-    app.setOrganizationName("SharpMark");
-    app.setOrganizationDomain("sharpmark.local");
-    app.setApplicationName("SharpMark");
 
-    // Instantiate our C++ backend
-    AppBackend backend;
+    qInfo() << "========================================";
+    qInfo() << "SharpMark Starting...";
+    qInfo() << "========================================";
 
-    QQmlApplicationEngine engine;
-    
-    // Expose the backend object to QML under the name "backend"
-    engine.rootContext()->setContextProperty("backend", &backend);
+    try {
+        QGuiApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
 
-    // Register custom image provider
-    engine.addImageProvider(QLatin1String("preview"), new ThumbnailProvider);
-    engine.addImageProvider(QLatin1String("full"), new FullImageProvider(&backend));
-    // Load the main QML file
-    const QUrl url(u"qrc:/SharpMark/qml/main.qml"_qs);
-    QObject::connect(&engine, &QQmlApplicationEngine::objectCreated,
-        &app, [url](QObject *obj, const QUrl &objUrl) {
-            if (!obj && url == objUrl)
-                QCoreApplication::exit(-1);
-        }, Qt::QueuedConnection);
-        
-    engine.load(url);
+        QGuiApplication app(argc, argv);
+        app.setOrganizationName("SharpMark");
+        app.setOrganizationDomain("sharpmark.local");
+        app.setApplicationName("SharpMark");
 
-    return app.exec(); // Start the Qt event loop
+        // Instantiate our C++ backend
+        AppBackend backend;
+
+        QQmlApplicationEngine engine;
+
+        // Expose the backend object to QML under the name "backend"
+        engine.rootContext()->setContextProperty("backend", &backend);
+
+        // Register custom image providers
+        engine.addImageProvider(QLatin1String("preview"), new ThumbnailProvider);
+        engine.addImageProvider(QLatin1String("full"), new FullImageProvider(&backend));
+
+        const QUrl url(u"qrc:/SharpMark/qml/main.qml"_qs);
+        QObject::connect(&engine, &QQmlApplicationEngine::objectCreated,
+            &app, [url](QObject *obj, const QUrl &objUrl) {
+                if (!obj && url == objUrl) {
+                    qFatal("Failed to load QML root object.");
+                    QCoreApplication::exit(-1);
+                }
+            }, Qt::QueuedConnection);
+
+        engine.load(url);
+
+        qInfo() << "Entering Qt event loop.";
+        return app.exec(); 
+
+    } catch (const std::exception& e) {
+        qCritical() << "UNCAUGHT C++ EXCEPTION:" << e.what();
+        return -1;
+    } catch (...) {
+        qCritical() << "UNCAUGHT UNKNOWN C++ EXCEPTION!";
+        return -1;
+    }
 }

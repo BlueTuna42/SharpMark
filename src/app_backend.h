@@ -294,7 +294,7 @@ private:
     std::atomic<bool> m_cancelRequested{false};
     std::thread m_scanThread;
     
-    std::vector<std::string> m_files;
+    std::vector<QString> m_files;
 
     // Settings Variables
     int m_themeMode = 0;
