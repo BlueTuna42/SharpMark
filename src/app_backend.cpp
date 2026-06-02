@@ -247,7 +247,8 @@ QVariantMap AppBackend::getPhotoMetadata(const QString& rawPath) {
     #else
         std::filesystem::path imgPath(cleanPath.toUtf8().constData());
     #endif
-    std::filesystem::path clipPath = imgPath.parent_path() / ".laplacian_cache" / (imgPath.filename().string() + ".clip");
+    std::filesystem::path clipPath = imgPath.parent_path() / ".laplacian_cache" / (imgPath.filename().u8string());
+    clipPath += ".clip"; 
 
     if (std::filesystem::exists(clipPath)) {
         std::vector<float> clipVector(512);

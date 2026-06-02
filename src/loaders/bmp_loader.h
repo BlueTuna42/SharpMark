@@ -5,6 +5,6 @@
 class DefaultImageLoader : public IImageLoader {
 public:
     std::unique_ptr<ImageBuffer> load(const ProcessingContext& ctx) override {
-        return ImageIO::readImage(ctx.filePath.string(), ctx.settings.rawAnalysisMode, true);
+        return ImageIO::readImage(ctx.rawFilePath, ctx.settings.rawAnalysisMode, true);
     }
 };
