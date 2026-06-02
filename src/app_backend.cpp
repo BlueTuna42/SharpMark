@@ -34,8 +34,7 @@
 #include "loaders/bmp_loader.h"
 #include "processors/laplacian_focus.h"
 #include "processors/state_cache.h"
-#include "processors/clip_embedding.h"
-#include "processors/aesthetic_scorer.h"
+#include "processors/aesthetic_processor.h"
 #include "processors/exposure_check.h"
 #include "postprocessors/state_cache.h"
 #include "processors/visual_hash.h"
@@ -60,9 +59,10 @@ PipelineRunner AppBackend::createPipeline() {
         } else if (step.id == "laplacian") {
             runner.addProcessor(std::make_unique<LaplacianFocusProcessor>());
         } else if (step.id == "aiaesthetic") {
-            runner.addProcessor(std::make_unique<ClipEmbeddingProcessor>("vision_model_quantized.onnx"));
-            std::filesystem::path configDir = get_app_config_dir();
-            runner.addProcessor(std::make_unique<AestheticScorer>(configDir));
+            std::filesystem::path appDataDir = get_app_config_dir();
+            std::filesystem::path modelsDir = QCoreApplication::applicationDirPath().toUtf8().constData();
+            
+            runner.addProcessor(std::make_unique<AestheticProcessor>(modelsDir, appDataDir));
         }
     }
 
@@ -257,12 +257,12 @@ QVariantMap AppBackend::getPhotoMetadata(const QString& rawPath) {
             clipFile.read(reinterpret_cast<char*>(clipVector.data()), 512 * sizeof(float));
             clipFile.close();
             
-            // Load latest weights and calculate fresh score
-            std::string exeDir = QCoreApplication::applicationDirPath().toStdString();
-            AestheticScorer scorer(exeDir);
+            std::filesystem::path exeDir = QCoreApplication::applicationDirPath().toUtf8().constData();
+            std::filesystem::path appDataDir = get_app_config_dir();
             
-            aiScore = scorer.evaluate(clipVector);
-            hasAiScore = true; // Force display even if CSV didn't have it
+            aiScore = AestheticProcessor::evaluateClipVector(exeDir, appDataDir, clipVector);
+            
+            hasAiScore = true;
             analysisFound = true;
             foundData = true;
         }
@@ -377,7 +377,7 @@ int AppBackend::getPhotoRating(const QString& rawPath) {
     return rating;
 }
 
-void AppBackend::setPhotoRating(const QString& rawPath, int rating) {
+void AppBackend::setPhotoRating(const QString& rawPath, int rating, float baseScore) {
     if (rating < 0 || rating > 5) return; 
 
     QString cleanPath = QUrl::fromPercentEncoding(rawPath.toUtf8());
@@ -397,26 +397,25 @@ void AppBackend::setPhotoRating(const QString& rawPath, int rating) {
 #endif
 
         if (!QFileInfo::exists(exiftoolPath)) {
-            qDebug() << "CRITICAL ERROR: exiftool NOT FOUND at" << exiftoolPath;
-            return;
+            qWarning() << "WARNING: exiftool NOT FOUND at" << exiftoolPath << ". Skipping XMP write, but continuing AI train.";
+        } else {
+            QString targetPath = cleanPath;
+            QFileInfo fi(cleanPath);
+            QString ext = fi.suffix().toLower();
+            QStringList rawFormats = {"cr2", "cr3", "nef", "arw", "dng", "raf", "orf", "rw2", "pef", "srw"};
+            
+            if (rawFormats.contains(ext)) {
+                targetPath = cleanPath + ".xmp";
+            }
+
+            QStringList args;
+            args << "-xmp:Rating=" + QString::number(rating)
+                 << "-overwrite_original"
+                 << QDir::toNativeSeparators(targetPath);
+
+            QProcess::startDetached(exiftoolPath, args);
+            qDebug() << "DEBUG WRITE: ExifTool spawned for" << targetPath;
         }
-
-        QString targetPath = cleanPath;
-        QFileInfo fi(cleanPath);
-        QString ext = fi.suffix().toLower();
-        QStringList rawFormats = {"cr2", "cr3", "nef", "arw", "dng", "raf", "orf", "rw2", "pef", "srw"};
-        if (rawFormats.contains(ext)) {
-            targetPath = cleanPath + ".xmp";
-        }
-
-        // Use QProcess: It is fully async, thread-safe, and natively handles Unicode on all OSes.
-        QStringList args;
-        args << "-rating=" + QString::number(rating)
-             << "-overwrite_original"
-             << targetPath;
-
-        QProcess::startDetached(exiftoolPath, args);
-        qDebug() << "DEBUG WRITE: ExifTool spawned for" << targetPath;
     }
 
     if (rating == 0) return; 
@@ -440,11 +439,13 @@ void AppBackend::setPhotoRating(const QString& rawPath, int rating) {
         return;
     }
 
-    std::string exeDir = QCoreApplication::applicationDirPath().toUtf8().constData();
-    qDebug() << "AI Train Started for rating:" << rating;
+    std::filesystem::path appDataDir = get_app_config_dir();
+    std::filesystem::path modelsDir = QCoreApplication::applicationDirPath().toUtf8().constData();
     
-    AestheticScorer scorer(exeDir);
-    scorer.train(clipVector, rating);
+    qDebug() << "AI Train Started for rating:" << rating << "with base score:" << baseScore;
+    
+    AestheticProcessor processor(modelsDir, appDataDir);
+    processor.train(clipVector, baseScore, rating);
     
     qDebug() << "AI Train Success! Weights saved.";
 }
@@ -715,7 +716,7 @@ void AppBackend::runScannerTask() {
 
                     for (const auto& metric : result.metrics) {
                         QString key = QString::fromStdString(metric.key).toLower();
-                        if (key == "aesthetic score" || key == "ai score" || key == "score") {
+                        if (key == "aesthetic_score" || key == "ai_score" || key == "score") {
                             if (std::holds_alternative<double>(metric.value)) aestheticScore = static_cast<float>(std::get<double>(metric.value));
                             else if (std::holds_alternative<int>(metric.value)) aestheticScore = static_cast<float>(std::get<int>(metric.value));
                         }

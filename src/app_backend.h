@@ -230,7 +230,7 @@ public:
     Q_INVOKABLE bool trashFile(const QString &filePath);
     Q_INVOKABLE QVariantMap getPhotoMetadata(const QString& filePath);
     Q_INVOKABLE int getPhotoRating(const QString& filePath);
-    Q_INVOKABLE void setPhotoRating(const QString& filePath, int rating);
+    Q_INVOKABLE void setPhotoRating(const QString& filePath, int rating, float baseScore = 0.0f);
 
     Q_PROPERTY(BurstFilterProxyModel* burstProxy READ burstProxy CONSTANT)
     BurstFilterProxyModel* burstProxy() { return &m_burstProxy; }

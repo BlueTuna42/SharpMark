@@ -25,13 +25,6 @@
 #include "qt_gui/thumbnail_provider.h"
 #include "qt_gui/full_image_provider.h"
 
-#include "loaders/bmp_loader.h"
-#include "processors/laplacian_focus.h"
-#include "processors/state_cache.h"
-#include "processors/clip_embedding.h"
-#include "processors/aesthetic_scorer.h"
-#include "postprocessors/state_cache.h"
-
 void customMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg) {
     static QFile outFile("sharpmark_debug.log");
     if (!outFile.isOpen()) {

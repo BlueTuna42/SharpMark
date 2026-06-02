@@ -25,7 +25,7 @@ else()
     set(ColorGreen "")
 endif()
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_AUTOMOC ON)
@@ -75,8 +75,7 @@ set(SOURCES
     src/img_tools/bmp.cpp
     src/tools/scan.cpp
     src/tools/XMP_tools.cpp
-    src/processors/clip_embedding.cpp
-    src/processors/aesthetic_scorer.cpp
+    src/processors/aesthetic_processor.cpp
     src/gui/utils/path_utils.cpp
 )
 
@@ -196,6 +195,10 @@ if(WIN32)
                       "${CMAKE_SOURCE_DIR}/assets/models/vision_model_quantized.onnx" SHOW_PROGRESS TIMEOUT 300)
     endif()
 
+    if(NOT EXISTS "${CMAKE_SOURCE_DIR}/assets/models/laion_aesthetic.onnx")
+        message(FATAL_ERROR "${ColorRed}laion_aesthetic.onnx not found! Please place it in assets/models/.${ColorReset}")
+    endif()
+
     # ------------------------------------------
     # Installation Routing (Everything to 'bin')
     # ------------------------------------------
@@ -216,7 +219,13 @@ if(WIN32)
     # Route Exiftool, ONNX Model, and ONNX DLL to 'bin'
     install(PROGRAMS "${CMAKE_SOURCE_DIR}/assets/exiftool/exiftool.exe" DESTINATION bin)
     install(DIRECTORY "${CMAKE_SOURCE_DIR}/assets/exiftool/exiftool_files" DESTINATION bin)
-    install(FILES "${CMAKE_SOURCE_DIR}/assets/models/vision_model_quantized.onnx" DESTINATION bin)
+    install(FILES 
+        "${CMAKE_SOURCE_DIR}/assets/models/vision_model_quantized.onnx" 
+    #    "${CMAKE_SOURCE_DIR}/assets/models/ia_3dlut_classifier.onnx"
+    #    "${CMAKE_SOURCE_DIR}/assets/models/base_luts.bin"
+        "${CMAKE_SOURCE_DIR}/assets/models/laion_aesthetic.onnx"
+        DESTINATION bin
+    )
     
     if(EXISTS "${ONNXRUNTIME_DIR}/lib/onnxruntime.dll")
         install(FILES "${ONNXRUNTIME_DIR}/lib/onnxruntime.dll" DESTINATION bin)
