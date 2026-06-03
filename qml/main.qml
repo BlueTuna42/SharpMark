@@ -92,6 +92,89 @@ Window {
         }
     }
 
+    component StyledComboBox : ComboBox {
+        id: control
+        implicitHeight: 34
+        
+        delegate: ItemDelegate {
+            width: control.popup.width
+            height: 34
+            contentItem: Text {
+                text: modelData
+                color: control.highlightedIndex === index ? "#ffffff" : textColor
+                font.pixelSize: 13
+                verticalAlignment: Text.AlignVCenter
+                leftPadding: 10
+            }
+            background: Rectangle {
+                radius: 4
+                anchors.fill: parent
+                anchors.margins: 2
+                color: control.highlightedIndex === index ? "#0066cc" : "transparent"
+            }
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    control.currentIndex = index
+                    control.activated(index)
+                    control.popup.close()
+                }
+            }
+        }
+
+        contentItem: Text {
+            leftPadding: 15
+            rightPadding: 30
+            text: control.currentText
+            font.pixelSize: 13
+            font.weight: Font.Medium
+            color: textColor
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+        }
+
+        background: Rectangle {
+            implicitWidth: Math.max(140, control.contentItem.implicitWidth + 40)
+            implicitHeight: 34
+            radius: 6
+            color: control.down ? (isLight ? "#d0d0d0" : "#1a1a1a") : (control.hovered ? (isLight ? "#e0e0e0" : "#333333") : (isLight ? "#ffffff" : "#252525"))
+            border.color: popupBorder
+            border.width: 1
+            
+            Text {
+                anchors.right: parent.right
+                anchors.rightMargin: 12
+                anchors.verticalCenter: parent.verticalCenter
+                text: "▼"
+                font.pixelSize: 10
+                color: isLight ? "#666" : "#aaa"
+            }
+            Behavior on color { ColorAnimation { duration: 100 } }
+        }
+
+        popup: Popup {
+            y: control.height + 4
+            width: control.width
+            implicitHeight: contentItem.implicitHeight + 8
+            padding: 4
+
+            contentItem: ListView {
+                clip: true
+                implicitHeight: contentHeight
+                model: control.popup.visible ? control.delegateModel : null
+                currentIndex: control.highlightedIndex
+            }
+
+            background: Rectangle {
+                color: popupBg
+                border.color: popupBorder
+                border.width: 1
+                radius: 6
+            }
+        }
+    }
+
     ListModel { id: resultsModel }
 
     Connections {
@@ -649,6 +732,7 @@ Window {
             anchors.margins: 20
             spacing: 15
 
+            // --- TOP ROW: Directory, Scanning, and Settings ---
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 10
@@ -670,26 +754,61 @@ Window {
                     text: "Cancel"
                     onClicked: backend.cancelScan()
                 }
-                Rectangle {
-                    width: 1
-                    height: 20
-                    color: popupBorder
-                    Layout.margins: 5
-                }
-                StyledButton {
-                    text: isGridView ? "View Mosaic" : "View List"
-                    onClicked: isGridView = !isGridView
-                }
                 StyledButton {
                     text: "Settings"
                     onClicked: settingsPopup.open()
-                }
-                Item { Layout.fillWidth: true }
+                }     
+                Item { Layout.fillWidth: true }      
                 Text {
                     text: backend.statusText
                     color: textColor
                     font.pixelSize: 16
                 }
+            }
+
+            // --- SECOND ROW: Photo Menu Controls (View & Sort) ---
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 15
+
+                Text {
+                    text: "Layout:"
+                    color: isLight ? "#666" : "#aaa"
+                    font.pixelSize: 13
+                    Layout.alignment: Qt.AlignVCenter
+                }
+
+                StyledComboBox {
+                    model: ["Mosaic Grid", "Detailed List"]
+                    currentIndex: isGridView ? 0 : 1
+                    onActivated: {
+                        isGridView = (currentIndex === 0)
+                    }
+                }
+                
+                Rectangle {
+                    width: 1
+                    height: 20
+                    color: popupBorder
+                    Layout.margins: 10
+                }
+                
+                Text {
+                    text: "Sort order:"
+                    color: isLight ? "#666" : "#aaa"
+                    font.pixelSize: 13
+                    Layout.alignment: Qt.AlignVCenter
+                }
+                
+                StyledComboBox {
+                    model: ["Default Scan Order", "Best First", "Worst First"]
+                    currentIndex: backend.burstProxy.sortMode
+                    onActivated: {
+                        backend.burstProxy.sortMode = currentIndex
+                    }
+                }
+                
+                Item { Layout.fillWidth: true }
             }
 
             ProgressBar {

@@ -126,8 +126,16 @@ class BurstFilterProxyModel : public QSortFilterProxyModel {
     Q_PROPERTY(QObject* source READ source WRITE setSource NOTIFY sourceChanged)
     Q_PROPERTY(bool groupBursts READ groupBursts WRITE setGroupBursts NOTIFY groupBurstsChanged)
     Q_PROPERTY(int count READ count NOTIFY countChanged)
+    Q_PROPERTY(SortMode sortMode READ sortMode WRITE setSortMode NOTIFY sortModeChanged)
 
 public:
+    enum SortMode {
+        SortDefault = 0,
+        SortBestFirst,
+        SortWorstFirst
+    };
+    Q_ENUM(SortMode)
+
     explicit BurstFilterProxyModel(QObject* parent = nullptr) : QSortFilterProxyModel(parent) {
         setDynamicSortFilter(true);
     }
@@ -176,6 +184,18 @@ public:
         return mapToSource(index(proxyRow, 0)).row();
     }
 
+     SortMode sortMode() const { return m_sortMode; }
+    
+    void setSortMode(SortMode mode) {
+        if (m_sortMode != mode) {
+            m_sortMode = mode;
+            
+            sort(0, m_sortMode == SortBestFirst ? Qt::DescendingOrder : Qt::AscendingOrder);
+            
+            emit sortModeChanged();
+        }
+    }
+
 protected:
     bool filterAcceptsRow(int source_row, const QModelIndex& source_parent) const override {
         if (!m_groupBursts) return true;
@@ -191,16 +211,41 @@ protected:
         return isLead || isExpanded; // Keep it if it's a leader, OR if the group was expanded
     }
 
+    bool lessThan(const QModelIndex &source_left, const QModelIndex &source_right) const override {
+        if (m_sortMode == SortDefault) {
+            return source_left.row() < source_right.row();
+        }
+
+        if (m_scoreRole == -1) m_scoreRole = roleNames().key("score", -1);
+        
+        float scoreL = 0.0f;
+        float scoreR = 0.0f;
+
+        if (m_scoreRole != -1) {
+            scoreL = sourceModel()->data(source_left, m_scoreRole).toFloat();
+            scoreR = sourceModel()->data(source_right, m_scoreRole).toFloat();
+        }
+
+        if (qFuzzyCompare(scoreL, scoreR)) {
+            return source_left.row() < source_right.row();
+        }
+
+        return scoreL < scoreR;
+    }
+
 signals:
     void sourceChanged();
     void groupBurstsChanged();
     void countChanged();
+    void sortModeChanged();
 
 private:
     QObject* m_source = nullptr;
     bool m_groupBursts = true;
     mutable int m_isLeadRole = -1;
     mutable int m_isExpandedRole = -1;
+    SortMode m_sortMode = SortDefault;
+    mutable int m_scoreRole = -1;
 };
 
 class AppBackend : public QObject {
