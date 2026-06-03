@@ -729,7 +729,7 @@ Window {
         ColumnLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            anchors.margins: 20
+            Layout.margins: 20
             spacing: 15
 
             // --- TOP ROW: Directory, Scanning, and Settings ---
@@ -758,11 +758,56 @@ Window {
                     text: "Settings"
                     onClicked: settingsPopup.open()
                 }     
-                Item { Layout.fillWidth: true }      
-                Text {
-                    text: backend.statusText
-                    color: textColor
-                    font.pixelSize: 16
+                Item { Layout.fillWidth: true }
+
+                // Status badge
+                Rectangle {
+                    readonly property bool isScanning:  backend.statusText === "Scanning..."
+                    readonly property bool isFinished:  backend.statusText === "Finished"
+                    readonly property bool isCancelled: backend.statusText === "Cancelled"
+                    readonly property bool isIdle:      !isScanning && !isFinished && !isCancelled
+
+                    readonly property color accentColor:
+                        isScanning  ? "#0078d4" :
+                        isFinished  ? "#4caf50" :
+                        isCancelled ? "#f44336" :
+                                      (isLight ? "#888888" : "#666666")
+
+                    radius: 6
+                    height: 34
+                    color: Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.12)
+                    border.color: Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.45)
+                    border.width: 1
+
+                    implicitWidth: badgeRow.implicitWidth + 24
+
+                    Behavior on color        { ColorAnimation { duration: 200 } }
+                    Behavior on border.color { ColorAnimation { duration: 200 } }
+
+                    Row {
+                        id: badgeRow
+                        anchors.centerIn: parent
+                        spacing: 8
+
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            font.pixelSize: 13
+                            font.weight: Font.Medium
+                            color: parent.parent.accentColor
+
+                            readonly property bool scanning: parent.parent.isScanning
+                            readonly property int  pct:
+                                backend.totalFiles > 0
+                                    ? Math.round(backend.progress / backend.totalFiles * 100)
+                                    : 0
+
+                            text: scanning
+                                ? backend.progress + " / " + backend.totalFiles + "  (" + pct + "%)"
+                                : backend.statusText
+
+                            Behavior on color { ColorAnimation { duration: 200 } }
+                        }
+                    }
                 }
             }
 
@@ -811,12 +856,39 @@ Window {
                 Item { Layout.fillWidth: true }
             }
 
-            ProgressBar {
+            // 3-segment quality bar: green (accepted) | red (rejected) | grey (unscanned)
+            Rectangle {
                 Layout.fillWidth: true
-                from: 0
-                to: backend.totalFiles
-                value: backend.progress
+                height: 10
+                radius: 5
                 visible: backend.totalFiles > 0
+                color: isLight ? "#dddddd" : "#3a3a3a"  // grey base (unscanned)
+                clip: true
+
+                readonly property real total: backend.totalFiles > 0 ? backend.totalFiles : 1
+                readonly property real acceptedFrac: backend.acceptedCount / total
+                readonly property real rejectedFrac: backend.rejectedCount / total
+
+                // Green segment (accepted) — left-anchored
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    width: parent.width * parent.acceptedFrac
+                    color: "#4caf50"
+                    Behavior on width { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
+                }
+
+                // Red segment (rejected) — immediately after green
+                Rectangle {
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    x: parent.width * parent.acceptedFrac
+                    width: parent.width * parent.rejectedFrac
+                    color: "#f44336"
+                    Behavior on width { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
+                    Behavior on x    { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
+                }
             }
 
             Item {

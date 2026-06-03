@@ -670,6 +670,8 @@ void AppBackend::startScan() {
     m_isScanning = true;
     m_cancelRequested = false;
     setProgress(0);
+    setAcceptedCount(0);
+    setRejectedCount(0);
     setStatusText("Scanning...");
 
     if (m_scanThread.joinable()) {
@@ -742,6 +744,12 @@ void AppBackend::runScannerTask() {
                     }
 
                     emit fileProcessed(static_cast<int>(idx), result.rejected, QString::fromStdString(result.rejectReason), aestheticScore, w, h);
+
+                    bool wasRejected = result.rejected;
+                    QMetaObject::invokeMethod(this, [this, wasRejected]() {
+                        if (wasRejected) setRejectedCount(m_rejectedCount + 1);
+                        else             setAcceptedCount(m_acceptedCount + 1);
+                    }, Qt::QueuedConnection);
                 }   
 
                 if (idx % 5 == 0 || idx == m_files.size() - 1) {
@@ -818,6 +826,16 @@ void AppBackend::setProgress(int value) {
 int AppBackend::totalFiles() const { return m_totalFiles; }
 void AppBackend::setTotalFiles(int value) {
     if (m_totalFiles != value) { m_totalFiles = value; emit totalFilesChanged(); }
+}
+
+int AppBackend::acceptedCount() const { return m_acceptedCount; }
+void AppBackend::setAcceptedCount(int value) {
+    if (m_acceptedCount != value) { m_acceptedCount = value; emit acceptedCountChanged(); }
+}
+
+int AppBackend::rejectedCount() const { return m_rejectedCount; }
+void AppBackend::setRejectedCount(int value) {
+    if (m_rejectedCount != value) { m_rejectedCount = value; emit rejectedCountChanged(); }
 }
 
 void AppBackend::setGroupBursts(bool group) {

@@ -255,6 +255,8 @@ class AppBackend : public QObject {
     Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged)
     Q_PROPERTY(int progress READ progress NOTIFY progressChanged)
     Q_PROPERTY(int totalFiles READ totalFiles NOTIFY totalFilesChanged)
+    Q_PROPERTY(int acceptedCount READ acceptedCount NOTIFY acceptedCountChanged)
+    Q_PROPERTY(int rejectedCount READ rejectedCount NOTIFY rejectedCountChanged)
     
     // Settings Properties
     Q_PROPERTY(int themeMode READ themeMode WRITE setThemeMode NOTIFY themeModeChanged)
@@ -286,6 +288,8 @@ public:
     QString statusText() const;
     int progress() const;
     int totalFiles() const;
+    int acceptedCount() const;
+    int rejectedCount() const;
     
     // Settings Getters and Setters
     int themeMode() const; 
@@ -313,6 +317,8 @@ signals:
     void statusTextChanged();
     void progressChanged();
     void totalFilesChanged();
+    void acceptedCountChanged();
+    void rejectedCountChanged();
     
     void themeModeChanged();
     void writeExifChanged();
@@ -333,6 +339,8 @@ private:
     QString m_statusText;
     int m_progress = 0;
     int m_totalFiles = 0;
+    int m_acceptedCount = 0;
+    int m_rejectedCount = 0;
     QString m_currentFolder;
 
     std::atomic<bool> m_isScanning{false};
@@ -354,6 +362,8 @@ private:
     void setStatusText(const QString &text);
     void setProgress(int value);
     void setTotalFiles(int value);
+    void setAcceptedCount(int value);
+    void setRejectedCount(int value);
     void runScannerTask();
     
     void loadSettings();
