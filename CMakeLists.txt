@@ -115,31 +115,100 @@ qt_add_qml_module(SharpMark
 )
 
 # ==========================================
-# ONNX Runtime Integration
+# ONNX Runtime Integration (auto-downloaded)
 # ==========================================
-set(ONNXRUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/onnxruntime")
+set(ONNXRUNTIME_VERSION "1.26.0")
+set(ONNXRUNTIME_DOWNLOAD_DIR "${CMAKE_CURRENT_BINARY_DIR}/onnxruntime_download")
+set(ONNXRUNTIME_EXTRACT_DIR "${CMAKE_CURRENT_BINARY_DIR}/onnxruntime_dist")
 
-if(EXISTS "${ONNXRUNTIME_DIR}/include/onnxruntime_cxx_api.h")
-    message(STATUS "${ColorGreen}ONNX Runtime found locally.${ColorReset}")
-    target_include_directories(SharpMark PRIVATE "${ONNXRUNTIME_DIR}/include")
-    
+# Determine the platform-specific release asset
+if(WIN32)
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(_ORT_ARCH "x64")
+    else()
+        set(_ORT_ARCH "x86")
+    endif()
+    set(_ORT_ARCHIVE "onnxruntime-win-${_ORT_ARCH}-${ONNXRUNTIME_VERSION}.zip")
+    set(_ORT_MARKER "${ONNXRUNTIME_EXTRACT_DIR}/onnxruntime-win-${_ORT_ARCH}-${ONNXRUNTIME_VERSION}/lib/onnxruntime.lib")
+elseif(APPLE)
+    # Universal binary (arm64 + x86_64)
+    set(_ORT_ARCHIVE "onnxruntime-osx-universal2-${ONNXRUNTIME_VERSION}.tgz")
+    set(_ORT_MARKER "${ONNXRUNTIME_EXTRACT_DIR}/onnxruntime-osx-universal2-${ONNXRUNTIME_VERSION}/lib/libonnxruntime.${ONNXRUNTIME_VERSION}.dylib")
+elseif(UNIX)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+        set(_ORT_ARCH "aarch64")
+    else()
+        set(_ORT_ARCH "x64")
+    endif()
+    set(_ORT_ARCHIVE "onnxruntime-linux-${_ORT_ARCH}-${ONNXRUNTIME_VERSION}.tgz")
+    set(_ORT_MARKER "${ONNXRUNTIME_EXTRACT_DIR}/onnxruntime-linux-${_ORT_ARCH}-${ONNXRUNTIME_VERSION}/lib/libonnxruntime.so.${ONNXRUNTIME_VERSION}")
+endif()
+
+set(_ORT_URL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/${_ORT_ARCHIVE}")
+set(_ORT_ARCHIVE_PATH "${ONNXRUNTIME_DOWNLOAD_DIR}/${_ORT_ARCHIVE}")
+
+if(NOT EXISTS "${_ORT_MARKER}")
+    message(STATUS "Downloading ONNX Runtime ${ONNXRUNTIME_VERSION} (${_ORT_ARCHIVE})...")
+    file(MAKE_DIRECTORY "${ONNXRUNTIME_DOWNLOAD_DIR}")
+    file(DOWNLOAD "${_ORT_URL}" "${_ORT_ARCHIVE_PATH}"
+        SHOW_PROGRESS
+        TIMEOUT 300
+        STATUS _ORT_DOWNLOAD_STATUS
+    )
+    list(GET _ORT_DOWNLOAD_STATUS 0 _ORT_DOWNLOAD_CODE)
+    if(NOT _ORT_DOWNLOAD_CODE EQUAL 0)
+        list(GET _ORT_DOWNLOAD_STATUS 1 _ORT_DOWNLOAD_ERR)
+        message(FATAL_ERROR "${ColorRed}Failed to download ONNX Runtime: ${_ORT_DOWNLOAD_ERR}${ColorReset}")
+    endif()
+    file(MAKE_DIRECTORY "${ONNXRUNTIME_EXTRACT_DIR}")
+    file(ARCHIVE_EXTRACT INPUT "${_ORT_ARCHIVE_PATH}" DESTINATION "${ONNXRUNTIME_EXTRACT_DIR}")
+    message(STATUS "${ColorGreen}ONNX Runtime ${ONNXRUNTIME_VERSION} extracted.${ColorReset}")
+else()
+    message(STATUS "${ColorGreen}ONNX Runtime ${ONNXRUNTIME_VERSION} already present (cached).${ColorReset}")
+endif()
+
+# Resolve the root of the extracted tree
+get_filename_component(_ORT_ROOT "${_ORT_MARKER}" DIRECTORY)  # lib/
+get_filename_component(_ORT_ROOT "${_ORT_ROOT}" DIRECTORY)    # root
+
+if(EXISTS "${_ORT_ROOT}/include/onnxruntime_cxx_api.h")
+    message(STATUS "${ColorGreen}ONNX Runtime ready: ${_ORT_ROOT}${ColorReset}")
+    target_include_directories(SharpMark PRIVATE "${_ORT_ROOT}/include")
+    add_definitions(-DUSE_ONNXRUNTIME)
+
     if(WIN32)
-        target_link_libraries(SharpMark PRIVATE "${ONNXRUNTIME_DIR}/lib/onnxruntime.lib")
-        # Copy DLL during dev builds so debugging works
+        target_link_libraries(SharpMark PRIVATE "${_ORT_ROOT}/lib/onnxruntime.lib")
+        # Copy DLLs into the build output dir for in-tree debugging
         add_custom_command(TARGET SharpMark POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${ONNXRUNTIME_DIR}/lib/onnxruntime.dll"
-            $<TARGET_FILE_DIR:SharpMark>
+                "${_ORT_ROOT}/lib/onnxruntime.dll"
+                $<TARGET_FILE_DIR:SharpMark>
         )
-    elseif(UNIX AND NOT APPLE)
-        target_link_libraries(SharpMark PRIVATE "${ONNXRUNTIME_DIR}/lib/libonnxruntime.so")
+        if(EXISTS "${_ORT_ROOT}/lib/onnxruntime_providers_shared.dll")
+            add_custom_command(TARGET SharpMark POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${_ORT_ROOT}/lib/onnxruntime_providers_shared.dll"
+                    $<TARGET_FILE_DIR:SharpMark>
+            )
+        endif()
+    elseif(APPLE)
+        target_link_libraries(SharpMark PRIVATE
+            "${_ORT_ROOT}/lib/libonnxruntime.${ONNXRUNTIME_VERSION}.dylib")
+        set_target_properties(SharpMark PROPERTIES
+            BUILD_RPATH "${_ORT_ROOT}/lib"
+            INSTALL_RPATH "@loader_path/../lib"
+        )
+    elseif(UNIX)
+        target_link_libraries(SharpMark PRIVATE
+            "${_ORT_ROOT}/lib/libonnxruntime.so.${ONNXRUNTIME_VERSION}")
         set_target_properties(SharpMark PROPERTIES INSTALL_RPATH "$ORIGIN/../lib")
     endif()
-
-    add_definitions(-DUSE_ONNXRUNTIME)
 else()
-    message(WARNING "${ColorRed}ONNX Runtime not found! AI features disabled.${ColorReset}")
+    message(FATAL_ERROR "${ColorRed}ONNX Runtime extraction succeeded but headers not found at ${_ORT_ROOT}/include.${ColorReset}")
 endif()
+
+# Expose the root for the install section below
+set(ONNXRUNTIME_DIR "${_ORT_ROOT}")
 
 # ==========================================
 # Deployment Setup (Windows Portable vs Linux)
@@ -230,6 +299,9 @@ if(WIN32)
     if(EXISTS "${ONNXRUNTIME_DIR}/lib/onnxruntime.dll")
         install(FILES "${ONNXRUNTIME_DIR}/lib/onnxruntime.dll" DESTINATION bin)
     endif()
+    if(EXISTS "${ONNXRUNTIME_DIR}/lib/onnxruntime_providers_shared.dll")
+        install(FILES "${ONNXRUNTIME_DIR}/lib/onnxruntime_providers_shared.dll" DESTINATION bin)
+    endif()
 
     # Explicitly copy LibRaw and ALL its transitive dependencies 
     # (lcms2-2, z, jpeg, tiff, etc.) directly from the vcpkg bin folder.
@@ -247,6 +319,22 @@ if(WIN32)
 else()
     # --- Linux Standard System Deployment ---
     install(TARGETS SharpMark DESTINATION bin)
+
+    # Install the ONNX Runtime shared library alongside the binary
+    if(APPLE)
+        install(FILES "${ONNXRUNTIME_DIR}/lib/libonnxruntime.${ONNXRUNTIME_VERSION}.dylib"
+            DESTINATION lib)
+    elseif(UNIX)
+        # Install the versioned .so and create an unversioned symlink
+        install(FILES "${ONNXRUNTIME_DIR}/lib/libonnxruntime.so.${ONNXRUNTIME_VERSION}"
+            DESTINATION lib)
+        install(CODE "
+            execute_process(COMMAND \${CMAKE_COMMAND} -E create_symlink
+                libonnxruntime.so.${ONNXRUNTIME_VERSION}
+                \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/lib/libonnxruntime.so\")
+        ")
+    endif()
+
     install(FILES assets/sharpmark.desktop DESTINATION share/applications)
     install(FILES assets/icons/256x256/icon.png DESTINATION share/icons/hicolor/256x256/apps RENAME sharpmark.png)
 
