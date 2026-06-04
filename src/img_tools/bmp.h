@@ -2,13 +2,13 @@
 #define BMP_H
 
 #include "../struct.h"
-#include <string>
 #include <memory>
+#include <QString>
 
 class ImageIO {
 public:
-    static std::unique_ptr<ImageBuffer> readImage(const std::string& filename, int rawMode, bool wantRGB);
-    static bool readOriginalSize(const std::string& filename, int& w, int& h);
+    static std::unique_ptr<ImageBuffer> readImage(const QString& filename, int rawMode, bool wantRGB);
+    static bool readOriginalSize(const QString& filename, int& w, int& h);
 };
 
 #endif

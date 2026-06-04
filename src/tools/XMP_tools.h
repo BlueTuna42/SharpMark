@@ -1,10 +1,10 @@
 #ifndef XMPTOOLS_H
 #define XMPTOOLS_H
 
-#include <string>
+#include <QString>
 
 namespace XMPTools {
-    int writeXmpRating(const std::string& exiftoolPath, const std::string& sourceFile, const std::string& targetFile, int rating);
+    int writeXmpRating(const QString& exiftoolPath, const QString& sourceFile, const QString& targetFile, int rating);
 }
 
 #endif

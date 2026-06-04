@@ -2,9 +2,10 @@
 #include "../pipeline/interfaces.h"
 #include "../tools/XMP_tools.h"
 #include <mutex>
-#include <fstream>
 #include <filesystem>
 #include <variant>
+#include <QFile>
+#include <QTextStream>
 
 class StateCachePostProcessor : public IPostProcessor {
 private:
@@ -20,9 +21,16 @@ public:
         if (!std::filesystem::exists(ctx.cacheDir, ec)) {
             std::filesystem::create_directories(ctx.cacheDir, ec);
         }
-        
-        std::ofstream out(ctx.cacheDir / "state.csv", std::ios::app);
-        
+
+#ifdef _WIN32
+        QString csvQPath = QString::fromStdWString((ctx.cacheDir / "state.csv").wstring());
+#else
+        QString csvQPath = QString::fromUtf8((ctx.cacheDir / "state.csv").c_str());
+#endif
+        QFile qf(csvQPath);
+        if (!qf.open(QIODevice::Append | QIODevice::Text)) return;
+        QTextStream out(&qf);
+
         double variance = 0.0;
         auto it_lap = result.sharedData.find("laplacian_variance");
         if (it_lap != result.sharedData.end()) {
@@ -39,9 +47,10 @@ public:
             }
         }
 
-        out << ctx.rawFilePath << "," 
-            << (result.isBlurry ? "1" : "0") << "," 
-            << variance << "," 
+        out << ctx.rawFilePath << ","
+            << (result.isBlurry ? "1" : "0") << ","
+            << variance << ","
             << aiScore << "\n";
+        qf.close();
     }
 };

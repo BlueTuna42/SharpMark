@@ -15,12 +15,15 @@
 #include "../Lib/stb_image.h"
 #include <libraw/libraw.h>
 
-std::unique_ptr<ImageBuffer> ImageIO::readImage(const std::string& filename, int rawMode, bool wantRGB) {
-    size_t extPos = filename.find_last_of('.');
-    std::string ext = (extPos == std::string::npos) ? "" : filename.substr(extPos);
+std::unique_ptr<ImageBuffer> ImageIO::readImage(const QString& filename, int rawMode, bool wantRGB) {
+#ifdef _WIN32
+    std::filesystem::path fs_path(filename.toStdWString());
+#else
+    std::filesystem::path fs_path(filename.toUtf8().constData());
+#endif
+    std::string ext = fs_path.extension().string();
 
 #ifdef _WIN32
-    std::filesystem::path fs_path = std::filesystem::u8path(filename);
     std::wstring w_filename = fs_path.wstring();
 #endif
 
@@ -36,7 +39,7 @@ std::unique_ptr<ImageBuffer> ImageIO::readImage(const std::string& filename, int
 #ifdef _WIN32
         openResult = libraw_open_wfile(lr, w_filename.c_str());
 #else
-        openResult = libraw_open_file(lr, filename.c_str());
+        openResult = libraw_open_file(lr, fs_path.c_str());
 #endif
 
         if (openResult != LIBRAW_SUCCESS) {
@@ -105,7 +108,7 @@ std::unique_ptr<ImageBuffer> ImageIO::readImage(const std::string& filename, int
             fclose(f);
         }
 #else
-        data = stbi_load(filename.c_str(), &w, &h, &c, 3);
+        data = stbi_load(fs_path.c_str(), &w, &h, &c, 3);
 #endif
         if (!data) return nullptr;
 
@@ -137,16 +140,17 @@ std::unique_ptr<ImageBuffer> ImageIO::readImage(const std::string& filename, int
     }
 }
 
-bool ImageIO::readOriginalSize(const std::string& filename, int& w, int& h) {
-    size_t extPos = filename.find_last_of('.');
-    std::string ext = (extPos == std::string::npos) ? "" : filename.substr(extPos);
+bool ImageIO::readOriginalSize(const QString& filename, int& w, int& h) {
+#ifdef _WIN32
+    std::filesystem::path fs_path(filename.toStdWString());
+    std::wstring w_filename = fs_path.wstring();
+#else
+    std::filesystem::path fs_path(filename.toUtf8().constData());
+#endif
+    std::string ext = fs_path.extension().string();
     bool isRaw = (strcasecmp(ext.c_str(), ".CR2") == 0 || strcasecmp(ext.c_str(), ".NEF") == 0 ||
                   strcasecmp(ext.c_str(), ".ARW") == 0 || strcasecmp(ext.c_str(), ".DNG") == 0 ||
                   strcasecmp(ext.c_str(), ".RW2") == 0 || strcasecmp(ext.c_str(), ".RAF") == 0);
-
-#ifdef _WIN32
-    std::wstring w_filename = std::filesystem::u8path(filename).wstring();
-#endif
 
     if (isRaw) {
         libraw_data_t *lr = libraw_init(0);
@@ -156,7 +160,7 @@ bool ImageIO::readOriginalSize(const std::string& filename, int& w, int& h) {
 #ifdef _WIN32
         openResult = libraw_open_wfile(lr, w_filename.c_str());
 #else
-        openResult = libraw_open_file(lr, filename.c_str());
+        openResult = libraw_open_file(lr, fs_path.c_str());
 #endif
         if (openResult == LIBRAW_SUCCESS) {
             w = lr->sizes.width;
@@ -175,7 +179,7 @@ bool ImageIO::readOriginalSize(const std::string& filename, int& w, int& h) {
             return res != 0;
         }
 #else
-        return stbi_info(filename.c_str(), &w, &h, &comp) != 0;
+        return stbi_info(fs_path.c_str(), &w, &h, &comp) != 0;
 #endif
     }
     return false;

@@ -139,7 +139,7 @@ double LaplacianProcessor::evaluateSharpnessFromLaplacian(const GrayscaleImage& 
 }
 
 // Save the as a raw binary float array
-bool LaplacianProcessor::saveLaplacian(const GrayscaleImage& lapImg, const std::string& filepath) {
+bool LaplacianProcessor::saveLaplacian(const GrayscaleImage& lapImg, const std::filesystem::path& filepath) {
     std::ofstream out(filepath, std::ios::binary);
     if (!out) return false;
     out.write(reinterpret_cast<const char*>(&lapImg.width), sizeof(int));
@@ -150,7 +150,7 @@ bool LaplacianProcessor::saveLaplacian(const GrayscaleImage& lapImg, const std::
 }
 
 // Loads from cache
-std::unique_ptr<GrayscaleImage> LaplacianProcessor::loadLaplacian(const std::string& filepath) {
+std::unique_ptr<GrayscaleImage> LaplacianProcessor::loadLaplacian(const std::filesystem::path& filepath) {
     std::ifstream in(filepath, std::ios::binary);
     if (!in) return nullptr;
     

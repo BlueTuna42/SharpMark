@@ -1,6 +1,8 @@
 #pragma once
 #include "../pipeline/interfaces.h"
 #include "../img_tools/laplacian.h"
+#include <QFile>
+#include <QTextStream>
 
 class StateCacheProcessor : public IImageProcessor {
 public:
@@ -11,14 +13,21 @@ public:
         std::filesystem::path csvPath = ctx.cacheDir / "state.csv";
         if (!std::filesystem::exists(csvPath)) return false;
 
-        std::ifstream in(csvPath);
-        std::string line;
-        while (std::getline(in, line)) {
-            size_t comma = line.find(',');
-            if (comma != std::string::npos && line.substr(0, comma) == ctx.rawFilePath) {
-                result.isBlurry = (line.substr(comma + 1) == "1");
+#ifdef _WIN32
+        QFile qf(QString::fromStdWString(csvPath.wstring()));
+#else
+        QFile qf(QString::fromUtf8(csvPath.c_str()));
+#endif
+        if (!qf.open(QIODevice::ReadOnly | QIODevice::Text)) return false;
+
+        QTextStream in(&qf);
+        while (!in.atEnd()) {
+            QString line = in.readLine();
+            int comma = line.indexOf(',');
+            if (comma != -1 && line.left(comma) == ctx.rawFilePath) {
+                result.isBlurry = (line.mid(comma + 1).startsWith('1'));
                 result.sharedData["loaded_from_state"] = true;
-                return true; 
+                return true;
             }
         }
         return false;

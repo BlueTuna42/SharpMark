@@ -60,8 +60,11 @@ PipelineRunner AppBackend::createPipeline() {
             runner.addProcessor(std::make_unique<LaplacianFocusProcessor>());
         } else if (step.id == "aiaesthetic") {
             std::filesystem::path appDataDir = get_app_config_dir();
-            std::filesystem::path modelsDir = QCoreApplication::applicationDirPath().toUtf8().constData();
-            
+#ifdef _WIN32
+            std::filesystem::path modelsDir(QCoreApplication::applicationDirPath().toStdWString());
+#else
+            std::filesystem::path modelsDir(QCoreApplication::applicationDirPath().toUtf8().constData());
+#endif
             runner.addProcessor(std::make_unique<AestheticProcessor>(modelsDir, appDataDir));
         }
     }
@@ -258,7 +261,11 @@ QVariantMap AppBackend::getPhotoMetadata(const QString& rawPath) {
             clipFile.read(reinterpret_cast<char*>(clipVector.data()), 512 * sizeof(float));
             clipFile.close();
             
-            std::filesystem::path exeDir = QCoreApplication::applicationDirPath().toUtf8().constData();
+#ifdef _WIN32
+            std::filesystem::path exeDir(QCoreApplication::applicationDirPath().toStdWString());
+#else
+            std::filesystem::path exeDir(QCoreApplication::applicationDirPath().toUtf8().constData());
+#endif
             std::filesystem::path appDataDir = get_app_config_dir();
             
             aiScore = AestheticProcessor::evaluateClipVector(exeDir, appDataDir, clipVector);
@@ -440,9 +447,13 @@ void AppBackend::setPhotoRating(const QString& rawPath, int rating, float baseSc
         return;
     }
 
+#ifdef _WIN32
+    std::filesystem::path modelsDir(QCoreApplication::applicationDirPath().toStdWString());
+#else
+    std::filesystem::path modelsDir(QCoreApplication::applicationDirPath().toUtf8().constData());
+#endif
     std::filesystem::path appDataDir = get_app_config_dir();
-    std::filesystem::path modelsDir = QCoreApplication::applicationDirPath().toUtf8().constData();
-    
+
     qDebug() << "AI Train Started for rating:" << rating << "with base score:" << baseScore;
     
     AestheticProcessor processor(modelsDir, appDataDir);
@@ -535,49 +546,47 @@ QString AppBackend::getSettingsFilePath() const {
 }
 
 void AppBackend::loadSettings() {
-    std::ifstream in(getSettingsFilePath().toStdString());
-    
     std::vector<QString> loadedIds;
     bool pipelineLoaded = false;
 
-    if (in.is_open()) {
-        std::string line;
-        while (std::getline(in, line)) {
-            std::istringstream iss(line);
-            std::string key;
-            if (std::getline(iss, key, '=')) {
-                std::string value;
-                if (std::getline(iss, value)) {
-                    if (key == "themeMode") m_themeMode = std::stoi(value);
-                    else if (key == "writeExif") m_writeExif = (value == "1");
-                    else if (key == "cacheLaplacian") m_cacheLaplacian = (value == "1");
-                    else if (key == "rawViewMode") m_rawViewMode = std::stoi(value);
-                    else if (key == "rawAnalysisMode") m_rawAnalysisMode = std::stoi(value);
-                    else if (key == "groupBursts") m_groupBursts = (value == "1");
-                    else if (key == "pipeline") {
-                        m_pipelineModel.clear();
-                        std::istringstream pStream(value);
-                        std::string token;
-                        while (std::getline(pStream, token, ',')) {
-                            size_t colonIdx = token.find(':');
-                            if (colonIdx != std::string::npos) {
-                                QString id = QString::fromStdString(token.substr(0, colonIdx));
-                                bool enabled = (token.substr(colonIdx + 1) == "1");
-                                
-                                QString name = id; 
-                                if (id == "exposure") name = "Exposure Check";
-                                if (id == "laplacian") name = "Laplacian Focus Check";
-                                if (id == "aiaesthetic") name = "AI Aesthetic Scorer";
-                                
-                                m_pipelineModel.addStep(id, name, enabled);
-                                loadedIds.push_back(id);
-                            }
-                        }
-                        pipelineLoaded = true;
+    QFile qf(getSettingsFilePath());
+    if (qf.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QTextStream in(&qf);
+        while (!in.atEnd()) {
+            QString qline = in.readLine();
+            int eq = qline.indexOf('=');
+            if (eq == -1) continue;
+            QString key   = qline.left(eq);
+            QString value = qline.mid(eq + 1);
+
+            if (key == "themeMode") m_themeMode = value.toInt();
+            else if (key == "writeExif") m_writeExif = (value == "1");
+            else if (key == "cacheLaplacian") m_cacheLaplacian = (value == "1");
+            else if (key == "rawViewMode") m_rawViewMode = value.toInt();
+            else if (key == "rawAnalysisMode") m_rawAnalysisMode = value.toInt();
+            else if (key == "groupBursts") m_groupBursts = (value == "1");
+            else if (key == "pipeline") {
+                m_pipelineModel.clear();
+                const QStringList tokens = value.split(',');
+                for (const QString& token : tokens) {
+                    int colonIdx = token.indexOf(':');
+                    if (colonIdx != -1) {
+                        QString id      = token.left(colonIdx);
+                        bool    enabled = (token.mid(colonIdx + 1) == "1");
+
+                        QString name = id;
+                        if (id == "exposure")    name = "Exposure Check";
+                        if (id == "laplacian")   name = "Laplacian Focus Check";
+                        if (id == "aiaesthetic") name = "AI Aesthetic Scorer";
+
+                        m_pipelineModel.addStep(id, name, enabled);
+                        loadedIds.push_back(id);
                     }
                 }
+                pipelineLoaded = true;
             }
         }
+        qf.close();
     }
 
     // If config didn't exist at all, clear and load defaults
@@ -601,22 +610,24 @@ void AppBackend::loadSettings() {
 }
 
 void AppBackend::saveSettings() {
-    std::ofstream out(getSettingsFilePath().toStdString());
-    if (!out.is_open()) return;
+    QFile qf(getSettingsFilePath());
+    if (!qf.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) return;
 
-    out << "themeMode=" << m_themeMode << "\n";
-    out << "writeExif=" << (m_writeExif ? 1 : 0) << "\n";
-    out << "cacheLaplacian=" << (m_cacheLaplacian ? 1 : 0) << "\n";
-    out << "rawViewMode=" << m_rawViewMode << "\n";
-    out << "rawAnalysisMode=" << m_rawAnalysisMode << "\n";
-    out << "groupBursts=" << (m_groupBursts ? 1 : 0) << "\n";
+    QTextStream out(&qf);
+    out << "themeMode="     << m_themeMode                  << "\n";
+    out << "writeExif="     << (m_writeExif ? 1 : 0)        << "\n";
+    out << "cacheLaplacian="<< (m_cacheLaplacian ? 1 : 0)   << "\n";
+    out << "rawViewMode="   << m_rawViewMode                 << "\n";
+    out << "rawAnalysisMode="<< m_rawAnalysisMode            << "\n";
+    out << "groupBursts="   << (m_groupBursts ? 1 : 0)      << "\n";
     out << "pipeline=";
     const auto& steps = m_pipelineModel.getSteps();
     for (size_t i = 0; i < steps.size(); ++i) {
-        out << steps[i].id.toStdString() << ":" << (steps[i].enabled ? 1 : 0);
+        out << steps[i].id << ":" << (steps[i].enabled ? 1 : 0);
         if (i < steps.size() - 1) out << ",";
     }
     out << "\n";
+    qf.close();
 }
 
 int AppBackend::themeMode() const { return m_themeMode; }
@@ -706,14 +717,14 @@ void AppBackend::runScannerTask() {
 #else
             ctx.filePath = std::filesystem::path(qFile.toUtf8().constData());
 #endif
-            ctx.rawFilePath = qFile.toUtf8().constData(); 
+            ctx.rawFilePath = qFile;
             ctx.cacheDir = ctx.filePath.parent_path() / ".laplacian_cache";
 
             ProcessingResult result = runner.run(ctx);
 
             if (result.success) {
                 int w = 0, h = 0;
-                ImageIO::readOriginalSize(ctx.rawFilePath, w, h); 
+                ImageIO::readOriginalSize(ctx.rawFilePath, w, h);
                     float aestheticScore = 0.0f;
                     uint64_t currentHash = 0;
 

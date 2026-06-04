@@ -17,8 +17,8 @@ public:
     static std::unique_ptr<GrayscaleImage> applyLaplacian(const GrayscaleImage& img);
     static double evaluateSharpnessFromLaplacian(const GrayscaleImage& lapImg, int gridCols = 5, int gridRows = 5);
     
-    static bool saveLaplacian(const GrayscaleImage& lapImg, const std::string& filepath);
-    static std::unique_ptr<GrayscaleImage> loadLaplacian(const std::string& filepath);
+    static bool saveLaplacian(const GrayscaleImage& lapImg, const std::filesystem::path& filepath);
+    static std::unique_ptr<GrayscaleImage> loadLaplacian(const std::filesystem::path& filepath);
 };
 
 #endif

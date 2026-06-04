@@ -19,7 +19,7 @@ public:
 
         auto cacheFile = getCachePath(ctx);
         if (std::filesystem::exists(cacheFile)) {
-            auto lapImg = LaplacianProcessor::loadLaplacian(cacheFile.string());
+            auto lapImg = LaplacianProcessor::loadLaplacian(cacheFile);
             if (lapImg) {
                 double maxVariance = LaplacianProcessor::evaluateSharpnessFromLaplacian(*lapImg, 5, 5);
                 
@@ -45,7 +45,7 @@ public:
             if (!std::filesystem::exists(ctx.cacheDir, ec)) {
                 std::filesystem::create_directories(ctx.cacheDir, ec);
             }
-            LaplacianProcessor::saveLaplacian(*lapImg, getCachePath(ctx).string());
+            LaplacianProcessor::saveLaplacian(*lapImg, getCachePath(ctx));
         } else {
             maxVariance = LaplacianProcessor::evaluateSharpness(*image, 5, 5);
         }

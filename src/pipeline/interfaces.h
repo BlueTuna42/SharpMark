@@ -5,6 +5,7 @@
 #include <memory>
 #include <filesystem>
 #include <unordered_map>
+#include <QString>
 #include "../struct.h"
 #include "../gui/gui.h"
 
@@ -14,7 +15,7 @@ struct AnalysisValue {
 };
 
 struct ProcessingContext {
-    std::string rawFilePath;
+    QString rawFilePath;
     std::filesystem::path filePath;
     AppSettings settings;
     std::filesystem::path cacheDir;
