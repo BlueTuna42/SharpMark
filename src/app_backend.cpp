@@ -37,19 +37,57 @@
 #include "processors/aesthetic_processor.h"
 #include "processors/exposure_check.h"
 #include "postprocessors/state_cache.h"
-#include "processors/visual_hash.h"
+#include "preprocessors/visual_hash_preprocessor.h"
+#include "preprocessors/lut_preprocessor.h"
 
 
 PipelineRunner AppBackend::createPipeline() {
     PipelineRunner runner;
     runner.setLoader(std::make_unique<DefaultImageLoader>());
-    
-    // Always add state cache and Hash first (infrastructure)
-    runner.addProcessor(std::make_unique<StateCacheProcessor>());
-    runner.addProcessor(std::make_unique<VisualHashProcessor>());
 
-    // Dynamically add processors based on user configuration
+    // --- Preprocessors ---
+
+    // Visual hash preprocessor (replaces the old VisualHashProcessor)
+    {
+        auto vhPre = std::make_unique<VisualHashPreprocessor>();
+        vhPre->setEnabled(m_preprocessorModel.isEnabled("visual_hash"));
+        runner.addPreprocessor(std::move(vhPre));
+    }
+
+    // 3D LUT preprocessor
+    {
+        auto lutPre = std::make_unique<LutPreprocessor>();
+        bool lutOn = m_lutEnabled && m_preprocessorModel.isEnabled("lut_3d")
+                     && m_activeLutName != "none" && !m_activeLutName.isEmpty();
+        lutPre->setEnabled(lutOn);
+        if (lutOn) {
+            QString lutPath = getLutsDir() + "/" + m_activeLutName;
+            try {
+                int dim = 33;
+#ifdef _WIN32
+                auto cubeData = LutPreprocessor::parseCubeFile(
+                    std::filesystem::path(lutPath.toStdWString()), dim);
+#else
+                auto cubeData = LutPreprocessor::parseCubeFile(
+                    std::filesystem::path(lutPath.toStdString()), dim);
+#endif
+                lutPre->setLut(cubeData, dim);
+                qDebug() << "[LUT] Pipeline LUT loaded:" << m_activeLutName << "dim=" << dim;
+            } catch (const std::exception& e) {
+                qWarning() << "[LUT] Failed to load LUT for pipeline:" << e.what();
+                lutPre->setEnabled(false);
+            }
+        }
+        runner.addPreprocessor(std::move(lutPre));
+    }
+
+    // --- Processors ---
+
+    // Always add state cache first (infrastructure)
     runner.addProcessor(std::make_unique<StateCacheProcessor>());
+    // Second state cache check after preprocessors have run
+    runner.addProcessor(std::make_unique<StateCacheProcessor>());
+
     const auto& steps = m_pipelineModel.getSteps();
     for (const auto& step : steps) {
         if (!step.enabled) continue;
@@ -77,9 +115,18 @@ PipelineRunner AppBackend::createPipeline() {
 
 AppBackend::AppBackend(QObject *parent)
     : QObject(parent), m_statusText("Ready") {
-    connect(&m_pipelineModel, &PipelineConfigModel::pipelineChanged, this, &AppBackend::saveSettings);
+    connect(&m_pipelineModel,      &PipelineConfigModel::pipelineChanged,
+            this, [this]() { if (!m_loadingSettings) saveSettings(); });
+    connect(&m_preprocessorModel,  &PreprocessorConfigModel::preprocessorChanged,
+            this, [this]() {
+                if (m_loadingSettings) return;
+                saveSettings();
+                reloadViewerLut();
+                emit activeLutChanged();
+            });
 
     loadSettings();
+    reloadViewerLut();
 }
 
 AppBackend::~AppBackend() {
@@ -88,6 +135,138 @@ AppBackend::~AppBackend() {
         m_scanThread.join();
     }
     saveSettings();
+}
+
+QString AppBackend::getLutsDir() const {
+    QString configDir;
+#ifdef Q_OS_WIN
+    configDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+#else
+    configDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+#endif
+    QString lutsDir = configDir + "/luts";
+    QDir d;
+    if (!d.exists(lutsDir)) d.mkpath(lutsDir);
+    return lutsDir;
+}
+
+QStringList AppBackend::availableLuts() const {
+    QDir dir(getLutsDir());
+    QStringList filters; filters << "*.cube" << "*.CUBE";
+    return dir.entryList(filters, QDir::Files, QDir::Name);
+}
+
+void AppBackend::loadLutFile(const QString& rawPath) {
+    QString srcPath = QUrl::fromPercentEncoding(rawPath.toUtf8());
+#ifdef Q_OS_WIN
+    if (srcPath.startsWith("file:///")) srcPath = srcPath.mid(8);
+#else
+    if (srcPath.startsWith("file://"))  srcPath = srcPath.mid(7);
+#endif
+    srcPath.replace('\\', '/');
+
+    QFileInfo fi(srcPath);
+    if (!fi.exists()) {
+        qWarning() << "[LUT] loadLutFile: source does not exist:" << srcPath;
+        return;
+    }
+
+    QString destPath = getLutsDir() + "/" + fi.fileName();
+    if (QFile::exists(destPath)) QFile::remove(destPath);
+    if (!QFile::copy(srcPath, destPath)) {
+        qWarning() << "[LUT] Failed to copy" << srcPath << "to" << destPath;
+        return;
+    }
+
+    m_activeLutName = fi.fileName();
+    m_lutEnabled    = true;
+    // Sync the preprocessor model's lut_3d row enabled state
+    for (int i = 0; i < static_cast<int>(m_preprocessorModel.getSteps().size()); ++i) {
+        if (m_preprocessorModel.getSteps()[i].id == "lut_3d")
+            m_preprocessorModel.setStepEnabled(i, true);
+    }
+
+    reloadViewerLut();
+    saveSettings();
+    emit lutEnabledChanged();
+    emit activeLutChanged();
+    qDebug() << "[LUT] Loaded and activated:" << m_activeLutName;
+}
+
+void AppBackend::selectLutPreset(const QString& name) {
+    if (name == "none" || name.isEmpty()) {
+        m_activeLutName = "none";
+        m_lutEnabled    = false;
+        m_viewerLutData.clear();
+        // Sync the preprocessor model
+        for (int i = 0; i < static_cast<int>(m_preprocessorModel.getSteps().size()); ++i) {
+            if (m_preprocessorModel.getSteps()[i].id == "lut_3d")
+                m_preprocessorModel.setStepEnabled(i, false);
+        }
+    } else {
+        m_activeLutName = name;
+        m_lutEnabled    = true;
+        // Sync the preprocessor model
+        for (int i = 0; i < static_cast<int>(m_preprocessorModel.getSteps().size()); ++i) {
+            if (m_preprocessorModel.getSteps()[i].id == "lut_3d")
+                m_preprocessorModel.setStepEnabled(i, true);
+        }
+        reloadViewerLut();
+    }
+    saveSettings();
+    emit lutEnabledChanged();
+    emit activeLutChanged();
+}
+
+void AppBackend::setLutEnabled(bool v) {
+    if (m_lutEnabled == v) return;
+    m_lutEnabled = v;
+    if (!v) m_viewerLutData.clear();
+    else    reloadViewerLut();
+    saveSettings();
+    emit lutEnabledChanged();
+    emit activeLutChanged();
+}
+
+void AppBackend::reloadViewerLut() const {
+    m_viewerLutData.clear();
+    if (!m_lutEnabled || m_activeLutName == "none" || m_activeLutName.isEmpty()) return;
+
+    QString lutPath = getLutsDir() + "/" + m_activeLutName;
+    try {
+        int dim = 33;
+#ifdef _WIN32
+        auto cubeData = LutPreprocessor::parseCubeFile(
+            std::filesystem::path(lutPath.toStdWString()), dim);
+#else
+        auto cubeData = LutPreprocessor::parseCubeFile(
+            std::filesystem::path(lutPath.toStdString()), dim);
+#endif
+        // Repack from cube (R-major RGB triplets) into [C][B][G][R] for applyLutToQImage
+        m_viewerLutDim = dim;
+        const int dim3 = dim * dim * dim;
+        m_viewerLutData.resize(3 * dim3);
+        for (int b = 0; b < dim; ++b)
+        for (int g = 0; g < dim; ++g)
+        for (int r = 0; r < dim; ++r) {
+            int cubeIdx = (b * dim * dim + g * dim + r) * 3;
+            int lutIdx  =  b * dim * dim + g * dim + r;
+            m_viewerLutData[0 * dim3 + lutIdx] = cubeData[cubeIdx + 0];
+            m_viewerLutData[1 * dim3 + lutIdx] = cubeData[cubeIdx + 1];
+            m_viewerLutData[2 * dim3 + lutIdx] = cubeData[cubeIdx + 2];
+        }
+        qDebug() << "[LUT] Viewer LUT loaded:" << m_activeLutName << "dim=" << dim;
+    } catch (const std::exception& e) {
+        qWarning() << "[LUT] Failed to reload viewer LUT:" << e.what();
+        m_viewerLutData.clear();
+    }
+}
+
+QImage AppBackend::applyViewerLut(const QImage& image) const {
+    if (!m_lutEnabled || m_viewerLutData.empty()) return image;
+    if (m_rawViewMode == 0) return image;  // thumbnail mode — skip
+    if (image.isNull()) return image;
+    return applyLutToQImage(image, m_viewerLutData, m_viewerLutDim);
 }
 
 QVariantMap AppBackend::getPhotoMetadata(const QString& rawPath) {
@@ -546,8 +725,12 @@ QString AppBackend::getSettingsFilePath() const {
 }
 
 void AppBackend::loadSettings() {
+    m_loadingSettings = true;
+
     std::vector<QString> loadedIds;
-    bool pipelineLoaded = false;
+    std::vector<QString> loadedPreIds;
+    bool pipelineLoaded    = false;
+    bool preprocessorLoaded = false;
 
     QFile qf(getSettingsFilePath());
     if (qf.open(QIODevice::ReadOnly | QIODevice::Text)) {
@@ -565,6 +748,8 @@ void AppBackend::loadSettings() {
             else if (key == "rawViewMode") m_rawViewMode = value.toInt();
             else if (key == "rawAnalysisMode") m_rawAnalysisMode = value.toInt();
             else if (key == "groupBursts") m_groupBursts = (value == "1");
+            else if (key == "lutEnabled") m_lutEnabled = (value == "1");
+            else if (key == "lutPreset")  m_activeLutName = value.trimmed();
             else if (key == "pipeline") {
                 m_pipelineModel.clear();
                 const QStringList tokens = value.split(',');
@@ -584,6 +769,26 @@ void AppBackend::loadSettings() {
                     }
                 }
                 pipelineLoaded = true;
+            }
+            else if (key == "preprocessors") {
+                m_preprocessorModel.clear();
+                const QStringList tokens = value.split(',');
+                for (const QString& token : tokens) {
+                    int colonIdx = token.indexOf(':');
+                    if (colonIdx != -1) {
+                        QString id      = token.left(colonIdx);
+                        bool    enabled = (token.mid(colonIdx + 1) == "1");
+
+                        QString name = id;
+                        bool    canDisable = true;
+                        if (id == "visual_hash") { name = "Burst Grouping (Visual Hash)"; canDisable = true; }
+                        if (id == "lut_3d")      { name = "Color LUT (3D)";               canDisable = true; }
+
+                        m_preprocessorModel.addStep(id, name, enabled, canDisable);
+                        loadedPreIds.push_back(id);
+                    }
+                }
+                preprocessorLoaded = true;
             }
         }
         qf.close();
@@ -607,19 +812,43 @@ void AppBackend::loadSettings() {
             m_pipelineModel.addStep("aiaesthetic", "AI Aesthetic Scorer", true);
         }
     }
+
+    if (!preprocessorLoaded) {
+        m_preprocessorModel.clear();
+        m_preprocessorModel.addStep("visual_hash", "Burst Grouping (Visual Hash)", true,  true);
+        m_preprocessorModel.addStep("lut_3d",      "Color LUT (3D)",               false, true);
+    } else {
+        // MERGE: add any missing preprocessors
+        if (std::find(loadedPreIds.begin(), loadedPreIds.end(), "visual_hash") == loadedPreIds.end())
+            m_preprocessorModel.addStep("visual_hash", "Burst Grouping (Visual Hash)", true,  true);
+        if (std::find(loadedPreIds.begin(), loadedPreIds.end(), "lut_3d") == loadedPreIds.end())
+            m_preprocessorModel.addStep("lut_3d", "Color LUT (3D)", false, true);
+    }
+
+    // Keep lut_3d model row in sync with m_lutEnabled
+    for (int i = 0; i < static_cast<int>(m_preprocessorModel.getSteps().size()); ++i) {
+        if (m_preprocessorModel.getSteps()[i].id == "lut_3d")
+            m_preprocessorModel.setStepEnabled(i, m_lutEnabled);
+    }
+
+    m_loadingSettings = false;
 }
 
 void AppBackend::saveSettings() {
+    if (m_loadingSettings) return;
     QFile qf(getSettingsFilePath());
     if (!qf.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) return;
 
     QTextStream out(&qf);
-    out << "themeMode="     << m_themeMode                  << "\n";
-    out << "writeExif="     << (m_writeExif ? 1 : 0)        << "\n";
-    out << "cacheLaplacian="<< (m_cacheLaplacian ? 1 : 0)   << "\n";
-    out << "rawViewMode="   << m_rawViewMode                 << "\n";
-    out << "rawAnalysisMode="<< m_rawAnalysisMode            << "\n";
-    out << "groupBursts="   << (m_groupBursts ? 1 : 0)      << "\n";
+    out << "themeMode="      << m_themeMode                  << "\n";
+    out << "writeExif="      << (m_writeExif ? 1 : 0)        << "\n";
+    out << "cacheLaplacian=" << (m_cacheLaplacian ? 1 : 0)   << "\n";
+    out << "rawViewMode="    << m_rawViewMode                 << "\n";
+    out << "rawAnalysisMode="<< m_rawAnalysisMode             << "\n";
+    out << "groupBursts="    << (m_groupBursts ? 1 : 0)      << "\n";
+    out << "lutEnabled="     << (m_lutEnabled ? 1 : 0)       << "\n";
+    out << "lutPreset="      << m_activeLutName               << "\n";
+
     out << "pipeline=";
     const auto& steps = m_pipelineModel.getSteps();
     for (size_t i = 0; i < steps.size(); ++i) {
@@ -627,6 +856,15 @@ void AppBackend::saveSettings() {
         if (i < steps.size() - 1) out << ",";
     }
     out << "\n";
+
+    out << "preprocessors=";
+    const auto& preSteps = m_preprocessorModel.getSteps();
+    for (size_t i = 0; i < preSteps.size(); ++i) {
+        out << preSteps[i].id << ":" << (preSteps[i].enabled ? 1 : 0);
+        if (i < preSteps.size() - 1) out << ",";
+    }
+    out << "\n";
+
     qf.close();
 }
 

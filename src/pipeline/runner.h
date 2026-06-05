@@ -9,12 +9,16 @@
 class PipelineRunner {
 private:
     std::unique_ptr<IImageLoader> loader_;
+    std::vector<std::unique_ptr<IImagePreprocessor>> preprocessors_;
     std::vector<std::unique_ptr<IImageProcessor>> processors_;
     std::vector<std::unique_ptr<IPostProcessor>> postProcessors_;
 
 public:
     void setLoader(std::unique_ptr<IImageLoader> loader) { loader_ = std::move(loader); }
-    
+
+    // Preprocessors run after the image is loaded, before any processor
+    void addPreprocessor(std::unique_ptr<IImagePreprocessor> preprocessor) { preprocessors_.push_back(std::move(preprocessor)); }
+
     // Processors will be executed in the order they are added
     void addProcessor(std::unique_ptr<IImageProcessor> processor) { processors_.push_back(std::move(processor)); }
     
@@ -49,6 +53,13 @@ public:
                         result.success = false;
                         result.warnings.push_back("Failed to load image");
                         break;
+                    }
+                    
+                    for (auto& pre : preprocessors_) {
+                        if (pre->isEnabled()) {
+                            pre->preprocess(currentImage, ctx, result);
+                            result.processorsRun.push_back(pre->name() + " (pre)");
+                        }
                     }
                 }
 

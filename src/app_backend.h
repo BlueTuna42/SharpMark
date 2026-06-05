@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QImage>
 #include <QString>
+#include <QStringList>
 #include <QVariantList>
 #include <QAbstractListModel>
 #include <QSortFilterProxyModel>
@@ -112,6 +113,101 @@ public:
         endMoveRows();
         
         emit pipelineChanged();
+    }
+
+    const std::vector<Step>& getSteps() const { return m_steps; }
+
+private:
+    std::vector<Step> m_steps;
+};
+
+// ---------------------------------------------------------------------------
+// PreprocessorConfigModel — drives the "Preprocessors" section in the sidebar.
+// Each row has: id, name, enabled, supportsDisable.
+// ---------------------------------------------------------------------------
+class PreprocessorConfigModel : public QAbstractListModel {
+    Q_OBJECT
+
+signals:
+    void preprocessorChanged();
+
+public:
+    enum Roles {
+        IdRole = Qt::UserRole + 1,
+        NameRole,
+        EnabledRole,
+        SupportsDisableRole
+    };
+
+    struct Step {
+        QString id;
+        QString name;
+        bool    enabled;
+        bool    supportsDisable;
+    };
+
+    explicit PreprocessorConfigModel(QObject *parent = nullptr) : QAbstractListModel(parent) {
+        m_steps.push_back({"visual_hash", "Burst Grouping (Visual Hash)", true,  true});
+        m_steps.push_back({"lut_3d",      "Color LUT (3D)",               false, true});
+    }
+
+    void clear() { beginResetModel(); m_steps.clear(); endResetModel(); }
+
+    void addStep(const QString& id, const QString& name, bool enabled, bool supportsDisable) {
+        beginInsertRows(QModelIndex(), m_steps.size(), m_steps.size());
+        m_steps.push_back({id, name, enabled, supportsDisable});
+        endInsertRows();
+    }
+
+    int rowCount(const QModelIndex& parent = QModelIndex()) const override {
+        if (parent.isValid()) return 0;
+        return static_cast<int>(m_steps.size());
+    }
+
+    QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override {
+        if (!index.isValid() || index.row() >= static_cast<int>(m_steps.size()))
+            return QVariant();
+        const Step& s = m_steps[index.row()];
+        switch (role) {
+            case IdRole:             return s.id;
+            case NameRole:           return s.name;
+            case EnabledRole:        return s.enabled;
+            case SupportsDisableRole:return s.supportsDisable;
+            default:                 return QVariant();
+        }
+    }
+
+    bool setData(const QModelIndex& index, const QVariant& value, int role = Qt::EditRole) override {
+        if (!index.isValid() || index.row() >= static_cast<int>(m_steps.size())) return false;
+        if (role == EnabledRole) {
+            m_steps[index.row()].enabled = value.toBool();
+            emit dataChanged(index, index, {role});
+            return true;
+        }
+        return false;
+    }
+
+    QHash<int, QByteArray> roleNames() const override {
+        QHash<int, QByteArray> roles;
+        roles[IdRole]              = "id";
+        roles[NameRole]            = "name";
+        roles[EnabledRole]         = "enabled";
+        roles[SupportsDisableRole] = "supportsDisable";
+        return roles;
+    }
+
+    Q_INVOKABLE void setStepEnabled(int index, bool enabled) {
+        if (index >= 0 && index < static_cast<int>(m_steps.size())) {
+            m_steps[index].enabled = enabled;
+            emit dataChanged(this->index(index), this->index(index), {EnabledRole});
+            emit preprocessorChanged();
+        }
+    }
+
+    bool isEnabled(const QString& id) const {
+        for (const auto& s : m_steps)
+            if (s.id == id) return s.enabled;
+        return false;
     }
 
     const std::vector<Step>& getSteps() const { return m_steps; }
@@ -267,6 +363,11 @@ class AppBackend : public QObject {
     Q_PROPERTY(QString histogramBase64 READ histogramBase64 NOTIFY histogramUpdated)
     Q_PROPERTY(bool groupBursts READ groupBursts WRITE setGroupBursts NOTIFY groupBurstsChanged)
 
+    // LUT properties
+    Q_PROPERTY(bool lutEnabled READ lutEnabled WRITE setLutEnabled NOTIFY lutEnabledChanged)
+    Q_PROPERTY(QString activeLutName READ activeLutName NOTIFY activeLutChanged)
+    Q_PROPERTY(QStringList availableLuts READ availableLuts NOTIFY activeLutChanged)
+
 public:
     explicit AppBackend(QObject *parent = nullptr);
     ~AppBackend();
@@ -279,11 +380,23 @@ public:
     Q_INVOKABLE int getPhotoRating(const QString& filePath);
     Q_INVOKABLE void setPhotoRating(const QString& filePath, int rating, float baseScore = 0.0f);
 
+    // LUT management
+    Q_INVOKABLE void loadLutFile(const QString& filePath);
+    Q_INVOKABLE void selectLutPreset(const QString& name); // "none" or filename
+
     Q_PROPERTY(BurstFilterProxyModel* burstProxy READ burstProxy CONSTANT)
     BurstFilterProxyModel* burstProxy() { return &m_burstProxy; }
 
     void updateHistogramFromImage(const QImage& image);
     QString histogramBase64() const { return m_histogramBase64; }
+
+    QImage applyViewerLut(const QImage& image) const;
+
+    // LUT getters/setters
+    bool lutEnabled() const { return m_lutEnabled; }
+    void setLutEnabled(bool v);
+    QString activeLutName() const { return m_activeLutName; }
+    QStringList availableLuts() const;
 
     QString statusText() const;
     int progress() const;
@@ -313,6 +426,9 @@ public:
     Q_PROPERTY(PipelineConfigModel* pipelineModel READ pipelineModel CONSTANT)
     PipelineConfigModel* pipelineModel() { return &m_pipelineModel; }
 
+    Q_PROPERTY(PreprocessorConfigModel* preprocessorModel READ preprocessorModel CONSTANT)
+    PreprocessorConfigModel* preprocessorModel() { return &m_preprocessorModel; }
+
 signals:
     void statusTextChanged();
     void progressChanged();
@@ -327,6 +443,9 @@ signals:
     void rawAnalysisModeChanged();
 
     void groupBurstsChanged();
+
+    void lutEnabledChanged();
+    void activeLutChanged();
     
     void fileFound(const QString &fileName, const QString &filePath, int index);
     void fileProcessed(int index, bool isRejected, QString rejectReason, float aestheticScore, int width, int height);
@@ -369,11 +488,24 @@ private:
     void loadSettings();
     void saveSettings();
     QString getSettingsFilePath() const;
+    QString getLutsDir() const;
+    bool m_loadingSettings = false;
 
     QString m_histogramBase64;
     std::vector<uint64_t> m_hashes;
 
     PipelineConfigModel m_pipelineModel;
+
+    // Preprocessor config
+    PreprocessorConfigModel m_preprocessorModel;
+
+    // LUT state
+    bool            m_lutEnabled    = false;
+    QString         m_activeLutName = "none";  
+    // Cached LUT data for the viewer (loaded on demand)
+    mutable std::vector<float> m_viewerLutData;
+    mutable int                m_viewerLutDim = 33;
+    void reloadViewerLut() const;
 
     PipelineRunner createPipeline();
 

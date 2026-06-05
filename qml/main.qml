@@ -348,6 +348,19 @@ Window {
             }
         }
 
+        // Reload the current image whenever the active LUT changes
+        Connections {
+            target: backend
+            function onActiveLutChanged() {
+                if (viewerWindow.visible && viewerWindow.currentIndex >= 0
+                        && viewerWindow.currentIndex < backend.burstProxy.count) {
+                    const file = backend.burstProxy.get(viewerWindow.currentIndex).filePath
+                    viewerImage.source = ""
+                    viewerImage.source = "image://full/" + encodeURIComponent(file)
+                }
+            }
+        }
+
         RowLayout {
             anchors.fill: parent
             spacing: 0
@@ -602,6 +615,74 @@ Window {
                 visible: pipelineSidebar.Layout.preferredWidth > 50
 
                 Text { text: "Pipeline Config"; color: textColor; font.bold: true; font.pixelSize: 16 }
+
+                // ---- PREPROCESSORS section ----
+                Text {
+                    text: "Preprocessors"
+                    color: isLight ? "#555" : "#bbb"
+                    font.pixelSize: 12
+                    font.bold: true
+                    font.capitalization: Font.AllUppercase
+                    font.letterSpacing: 0.8
+                }
+
+                ListView {
+                    id: preprocessorList
+                    Layout.fillWidth: true
+                    implicitHeight: contentHeight
+                    clip: true
+                    spacing: 4
+                    interactive: false
+                    model: backend.preprocessorModel
+
+                    delegate: Rectangle {
+                        width: preprocessorList.width
+                        height: 40
+                        radius: 4
+                        color: isLight ? "#f0f0f0" : "#2a2a2a"
+                        border.color: popupBorder
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 10
+                            anchors.rightMargin: 10
+                            spacing: 8
+
+                            CheckBox {
+                                enabled: model.supportsDisable
+                                checked: model.enabled
+                                opacity: model.supportsDisable ? 1.0 : 0.4
+                                onCheckedChanged: {
+                                    backend.preprocessorModel.setStepEnabled(model.index, checked)
+                                }
+                            }
+
+                            Text {
+                                text: model.name
+                                color: model.enabled ? textColor : (isLight ? "#999" : "#666")
+                                Layout.fillWidth: true
+                                font.pixelSize: 13
+                            }
+                        }
+                    }
+                }
+
+                // Separator between preprocessors and processors
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 1
+                    color: popupBorder
+                }
+
+                // ---- PROCESSORS section ----
+                Text {
+                    text: "Processors"
+                    color: isLight ? "#555" : "#bbb"
+                    font.pixelSize: 12
+                    font.bold: true
+                    font.capitalization: Font.AllUppercase
+                    font.letterSpacing: 0.8
+                }
                 Text { text: "Drag '≡' to reorder."; color: isLight ? "#666" : "#aaa"; font.pixelSize: 12 }
 
                 ListView {
@@ -700,28 +781,6 @@ Window {
                 Item { 
                     Layout.fillHeight: true 
                 }
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 1
-                    color: popupBorder
-                }
-
-                CheckBox {
-                    text: "Group Burst Photos"
-                    checked: mainWindow.groupBursts
-                    onCheckedChanged: {
-                        mainWindow.groupBursts = checked
-                        backend.groupBursts = checked
-                    }
-                    contentItem: Text {
-                        text: parent.text
-                        color: textColor
-                        font.pixelSize: 14
-                        verticalAlignment: Text.AlignVCenter
-                        leftPadding: parent.indicator.width + parent.spacing
-                    }
-                }
             }
         } 
 
@@ -811,7 +870,7 @@ Window {
                 }
             }
 
-            // --- SECOND ROW: Photo Menu Controls (View & Sort) ---
+            // --- SECOND ROW: Photo Menu Controls (View, Sort, LUT) ---
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 15
@@ -850,6 +909,60 @@ Window {
                     currentIndex: backend.burstProxy.sortMode
                     onActivated: {
                         backend.burstProxy.sortMode = currentIndex
+                    }
+                }
+
+                Rectangle {
+                    width: 1
+                    height: 20
+                    color: popupBorder
+                    Layout.margins: 10
+                }
+
+                Text {
+                    text: "Color LUT:"
+                    color: isLight ? "#666" : "#aaa"
+                    font.pixelSize: 13
+                    Layout.alignment: Qt.AlignVCenter
+                }
+
+                StyledComboBox {
+                    id: lutCombo
+                    property var lutList: backend.availableLuts
+                    model: {
+                        var list = ["None"]
+                        for (var i = 0; i < lutList.length; i++) list.push(lutList[i])
+                        return list
+                    }
+                    currentIndex: {
+                        if (!backend.lutEnabled || backend.activeLutName === "none") return 0
+                        var idx = lutList.indexOf(backend.activeLutName)
+                        return idx >= 0 ? idx + 1 : 0
+                    }
+                    onActivated: {
+                        if (currentIndex === 0) {
+                            backend.selectLutPreset("none")
+                        } else {
+                            backend.selectLutPreset(model[currentIndex])
+                        }
+                    }
+                    Connections {
+                        target: backend
+                        function onActiveLutChanged() { lutCombo.currentIndex = lutCombo.currentIndex }
+                    }
+                }
+
+                StyledButton {
+                    text: "Load .cube..."
+                    onClicked: lutFileDialog.open()
+                }
+
+                FileDialog {
+                    id: lutFileDialog
+                    title: "Select 3D LUT File"
+                    nameFilters: ["CUBE LUT files (*.cube *.CUBE)", "All files (*)"]
+                    onAccepted: {
+                        backend.loadLutFile(selectedFile)
                     }
                 }
                 
