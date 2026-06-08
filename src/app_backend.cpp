@@ -61,7 +61,7 @@ PipelineRunner AppBackend::createPipeline() {
                      && m_activeLutName != "none" && !m_activeLutName.isEmpty();
         lutPre->setEnabled(lutOn);
         if (lutOn) {
-            QString lutPath = getLutsDir() + "/" + m_activeLutName;
+            QString lutPath = resolveLutPath(m_activeLutName);
             try {
                 int dim = 33;
 #ifdef _WIN32
@@ -138,27 +138,74 @@ AppBackend::~AppBackend() {
 }
 
 QString AppBackend::getLutsDir() const {
-    QString configDir;
 #ifdef Q_OS_WIN
-    configDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    // Portable layout: SharpMark_Portable/
+    //   SharpMark.exe          (launcher)
+    //   bin/SharpMark-core.exe (core, this process)
+    //   luts/                  (LUT directory — sibling of bin/)
+    QString lutsDir = QCoreApplication::applicationDirPath() + "/../luts";
+    lutsDir = QDir::cleanPath(lutsDir);
 #else
-    configDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    // Linux: user-writable LUTs in ~/.config/SharpMark/luts
+    QString lutsDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/luts";
 #endif
-    QString lutsDir = configDir + "/luts";
     QDir d;
     if (!d.exists(lutsDir)) d.mkpath(lutsDir);
     return lutsDir;
 }
 
+QString AppBackend::getLutsSystemDir() const {
+#ifdef Q_OS_WIN
+    return QString(); // no separate system dir on Windows portable
+#else
+    // Installed by .deb to /usr/share/sharpmark/luts (or wherever prefix points)
+    return QStandardPaths::locate(QStandardPaths::GenericDataLocation,
+                                  "sharpmark/luts", QStandardPaths::LocateDirectory);
+#endif
+}
+
 QStringList AppBackend::availableLuts() const {
-    QDir dir(getLutsDir());
-    QStringList filters; filters << "*.cube" << "*.CUBE";
-    QStringList files = dir.entryList(filters, QDir::Files, QDir::Name);
+    QStringList filters = { "*.cube", "*.CUBE" };
+    QSet<QString> seen;
     QStringList names;
-    names.reserve(files.size());
-    for (const QString &f : files)
-        names << QFileInfo(f).completeBaseName();
+
+    // Helper: scan a directory and append unseen basenames
+    auto scanDir = [&](const QString& path) {
+        if (path.isEmpty()) return;
+        QDir dir(path);
+        const QStringList files = dir.entryList(filters, QDir::Files, QDir::Name);
+        for (const QString& f : files) {
+            QString base = QFileInfo(f).completeBaseName();
+            if (!seen.contains(base)) {
+                seen.insert(base);
+                names << base;
+            }
+        }
+    };
+
+    scanDir(getLutsDir());        // user LUTs first
+    scanDir(getLutsSystemDir());  // system LUTs second (Linux only)
+
     return names;
+}
+
+// Resolve a LUT base name (without extension) or filename to a full path.
+// Checks user dir first, then system dir. Returns empty string if not found.
+QString AppBackend::resolveLutPath(const QString& baseName) const {
+    // baseName may or may not have .cube extension — stored names have no extension
+    auto tryPath = [](const QString& dir, const QString& name) -> QString {
+        if (dir.isEmpty()) return {};
+        // Try with and without extension
+        for (const QString& candidate : { dir + "/" + name + ".cube",
+                                          dir + "/" + name + ".CUBE",
+                                          dir + "/" + name }) {
+            if (QFile::exists(candidate)) return candidate;
+        }
+        return {};
+    };
+    QString p = tryPath(getLutsDir(), baseName);
+    if (p.isEmpty()) p = tryPath(getLutsSystemDir(), baseName);
+    return p;
 }
 
 void AppBackend::loadLutFile(const QString& rawPath) {
@@ -237,7 +284,11 @@ void AppBackend::reloadViewerLut() const {
     m_viewerLutData.clear();
     if (!m_lutEnabled || m_activeLutName == "none" || m_activeLutName.isEmpty()) return;
 
-    QString lutPath = getLutsDir() + "/" + m_activeLutName;
+    QString lutPath = resolveLutPath(m_activeLutName);
+    if (lutPath.isEmpty()) {
+        qWarning() << "[LUT] reloadViewerLut: could not find LUT:" << m_activeLutName;
+        return;
+    }
     try {
         int dim = 33;
 #ifdef _WIN32

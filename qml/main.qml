@@ -1240,6 +1240,8 @@ Window {
                                         mainWindow.toggleOne(model.filePath, index)
                                     } else if (mouse.modifiers & Qt.ShiftModifier) {
                                         mainWindow.selectRange(index)
+                                    } else if (gridCard.itemSelected) {
+                                        mainWindow.toggleOne(model.filePath, index)
                                     } else {
                                         mainWindow.selectSingle(model.filePath, index)
                                     }
@@ -1287,38 +1289,6 @@ Window {
                                     color: model.status === "WAITING" ? cardWaitingText : (model.isRejected ? cardBlurryText : cardSharpText)
                                     font.bold: true
                                     font.pixelSize: 12
-                                }
-                            }
-
-                            // SELECTION OVERLAY
-                            Rectangle {
-                                anchors.fill: parent
-                                radius: parent.radius
-                                color: "#330066cc"
-                                visible: gridCard.itemSelected
-                                z: 5
-                            }
-
-                            // SELECTION CHECKMARK — always shown so user knows items are clickable
-                            Rectangle {
-                                anchors.bottom: parent.bottom
-                                anchors.right: parent.right
-                                anchors.margins: 8
-                                width: 22
-                                height: 22
-                                radius: 11
-                                color: gridCard.itemSelected ? "#0066cc" : "transparent"
-                                border.color: gridCard.itemSelected ? "#ffffff" : (isLight ? "#aaaaaa" : "#777777")
-                                border.width: 2
-                                z: 10
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: "\u2713"
-                                    color: "white"
-                                    font.pixelSize: 13
-                                    font.bold: true
-                                    visible: gridCard.itemSelected
                                 }
                             }
 
@@ -1421,6 +1391,8 @@ Window {
                                         mainWindow.toggleOne(model.filePath, index)
                                     } else if (mouse.modifiers & Qt.ShiftModifier) {
                                         mainWindow.selectRange(index)
+                                    } else if (listCard.itemSelected) {
+                                        mainWindow.toggleOne(model.filePath, index)
                                     } else {
                                         mainWindow.selectSingle(model.filePath, index)
                                     }
@@ -1436,26 +1408,6 @@ Window {
                                 anchors.fill: parent
                                 anchors.margins: 5
                                 spacing: 15
-
-                                // SELECTION CHECKBOX (list view)
-                                Rectangle {
-                                    width: 22
-                                    height: 22
-                                    radius: 11
-                                    color: listCard.itemSelected ? "#0066cc" : "transparent"
-                                    border.color: listCard.itemSelected ? "#ffffff" : (isLight ? "#aaaaaa" : "#777777")
-                                    border.width: 2
-                                    Layout.leftMargin: 4
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "\u2713"
-                                        color: "white"
-                                        font.pixelSize: 13
-                                        font.bold: true
-                                        visible: listCard.itemSelected
-                                    }
-                                }
 
                                 Image {
                                     Layout.preferredWidth: 70
@@ -1493,14 +1445,6 @@ Window {
                                 }
                             }
 
-                            // SELECTION OVERLAY
-                            Rectangle {
-                                anchors.fill: parent
-                                radius: parent.radius
-                                color: "#330066cc"
-                                visible: listCard.itemSelected
-                                z: 5
-                            }
                         }
                     }
                 }

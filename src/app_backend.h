@@ -485,7 +485,9 @@ private:
     void loadSettings();
     void saveSettings();
     QString getSettingsFilePath() const;
-    QString getLutsDir() const;
+    QString getLutsDir() const;           // user-writable LUTs directory
+    QString getLutsSystemDir() const;     // read-only system LUTs directory (Linux only)
+    QString resolveLutPath(const QString& baseName) const; // finds file in user dir, then system dir
     bool m_loadingSettings = false;
 
     QString m_histogramBase64;

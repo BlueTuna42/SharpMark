@@ -276,6 +276,12 @@ if(WIN32)
     install(TARGETS SharpMark RUNTIME DESTINATION bin)
     install(TARGETS SharpMark_Launcher RUNTIME DESTINATION .)
 
+    # Bundled LUTs — installed to SharpMark_Portable/luts/ (sibling of bin/)
+    if(EXISTS "${CMAKE_SOURCE_DIR}/assets/luts")
+        install(DIRECTORY "${CMAKE_SOURCE_DIR}/assets/luts/" DESTINATION luts
+            FILES_MATCHING PATTERN "*.cube" PATTERN "*.CUBE")
+    endif()
+
     # Let Qt deploy all its DLLs and QML plugins natively to 'bin'
     qt_generate_deploy_qml_app_script(
         TARGET SharpMark
@@ -337,6 +343,12 @@ else()
 
     install(FILES assets/sharpmark.desktop DESTINATION share/applications)
     install(FILES assets/icons/256x256/icon.png DESTINATION share/icons/hicolor/256x256/apps RENAME sharpmark.png)
+
+    # Bundled LUTs — installed to /usr/share/sharpmark/luts/ by the .deb
+    if(EXISTS "${CMAKE_SOURCE_DIR}/assets/luts")
+        install(DIRECTORY "${CMAKE_SOURCE_DIR}/assets/luts/" DESTINATION share/sharpmark/luts
+            FILES_MATCHING PATTERN "*.cube" PATTERN "*.CUBE")
+    endif()
 
     # Uninstall Target
     if(NOT TARGET uninstall)
