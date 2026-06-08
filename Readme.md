@@ -6,21 +6,41 @@
 
 ## About
 
-**SharpMark** is a cross-platform graphical desktop application designed to automatically detect and filter out blurry images from large photographic batches. 
+**SharpMark** is a cross-platform graphical desktop application designed to automatically detect and filter out blurry and poorly-exposed images from large photographic batches.
 
-Built with C++ and GTK3, the tool delivers a consistent native experience across Windows and Linux. It provides a clean, responsive interface while executing high-performance image evaluation underneath, calculating sharpness via Laplacian variance. To integrate seamlessly into professional photography workflows, SharpMark handles RAW files natively via LibRaw, features a robust built-in image viewer for manual inspection, and can optionally write evaluation results directly to EXIF metadata using libexif.
+Built with C++ and Qt6, the tool delivers a consistent native experience across Windows and Linux. It provides a clean, responsive interface while executing a configurable multi-stage analysis pipeline underneath. The pipeline evaluates focus sharpness via Laplacian variance, flags severely under- or overexposed shots, and optionally scores each image for aesthetic quality using on-device AI models. To integrate seamlessly into professional photography workflows, SharpMark handles RAW files natively via LibRaw, features a robust built-in image viewer for manual inspection, and can write evaluation results directly to XMP metadata using ExifTool.
 
 ## Features
 
-* **Cross-Platform Compatibility:** Fully supported on Windows and Linux, providing a consistent and native desktop experience across different operating systems.
-* **Integrated Image Viewer:** Features a dedicated, built-in full-resolution image viewer, allowing users to manually inspect photos and verify focus accuracy without relying on external software.
-* **Native Graphical Interface:** A responsive GTK3-based GUI offering dynamic List and Grid view modes, `Ctrl + Scroll` thumbnail scaling, and system-aware dark/light theme integration.
+* **Cross-Platform Compatibility:** Fully supported on Windows and Linux, providing a consistent native desktop experience across operating systems.
+* **Integrated Image Viewer:** A dedicated full-resolution image viewer with smooth scroll-to-zoom, pan, keyboard navigation, and a collapsible metadata/histogram sidebar for manual inspection without relying on external software.
+* **Native Graphical Interface:** A responsive Qt6 Quick-based GUI offering dynamic Mosaic Grid and Detailed List view modes, system-aware dark/light/system theme integration, and animated transitions.
 * **High Performance:** Multi-threaded architecture designed to quickly parse and analyze large batches of high-resolution images.
-* **Accurate Blur Detection:** Evaluates focal sharpness mathematically using Laplacian variance.
-* **Smart Laplacian Caching:** Optionally saves and reuses computed technical Laplacian edge maps as lossless binaries, enabling near-instantaneous re-scans of previously analyzed folders and allowing users to visualize the exact edge data the algorithm sees in the built-in viewer.
-* **Advanced RAW Support:** Powered by LibRaw, featuring configurable RAW loading modes (Full-size, Half-size, or Preview) to balance computational accuracy and processing speed.
-* **Optional Metadata Tagging:** Powered by libexif, the application can be configured to automatically write standard star ratings to image metadata (1-star for blurry, 5-star for sharp) for immediate integration with Lightroom, Capture One, and darktable.
+* **Configurable Analysis Pipeline:** A toggleable sidebar lets you enable, disable, and drag-to-reorder the processing steps — Exposure Check, Laplacian Focus Check, and AI Aesthetic Scorer — before each scan.
+* **Blur Detection:** Evaluates focal sharpness mathematically using Laplacian variance.
+* **Exposure Check:** Automatically rejects severely underexposed or overexposed images based on a configurable pixel-clipping threshold, independent of the sharpness analysis.
+* **AI Aesthetic Scoring:** Powered by on-device ONNX models (CLIP ViT + LAION Aesthetic Predictor), each image receives a floating-point aesthetic score displayed directly on its card. No internet connection is required at runtime.
+* **Active Learning / Personal Model:** Assigning star ratings in the viewer trains a lightweight personal linear model that continuously adjusts future aesthetic scores to match your taste. Learned weights are saved locally and persist between sessions.
+* **Burst Grouping:** Uses a fast perceptual dHash algorithm to automatically detect and group visually similar burst-sequence shots. Groups are collapsible in both Grid and List views, keeping the workspace uncluttered.
+* **Advanced RAW Support:** Powered by LibRaw, featuring independently configurable RAW loading modes for viewing (Thumbnail, Half-size, Full-size) and analysis, so you can balance preview speed against computational accuracy.
+* **3D LUT Preview:** Load any standard `.cube` LUT file to apply a real-time color grade in the image viewer. Switch between loaded presets from the toolbar — useful for evaluating images under a specific color treatment before exporting.
+* **Live Histogram:** The viewer sidebar renders a real-time RGB histogram for the currently displayed image.
+* **Star Ratings & XMP Metadata:** Assign 1–5 star ratings via on-screen clicks or keyboard shortcuts (`1`–`5`, `0` to clear). Ratings can be written directly to XMP metadata using the bundled ExifTool, making them immediately visible in Lightroom, Capture One, and darktable.
+* **Result Sorting:** Sort the image list by Default Scan Order, Best First, or Worst First based on the computed aesthetic score.
 * **Efficient File Management:** Includes bulk deletion capabilities to immediately move out-of-focus shots to the system trash.
+
+---
+
+## Viewer Keyboard Shortcuts
+
+| Key | Action |
+|---|---|
+| `←` / `→` | Previous / Next image |
+| `1` – `5` | Set star rating |
+| `0` | Clear star rating |
+| `Delete` | Move current image to Trash |
+| `Escape` | Close viewer |
+
 ---
 
 ## Installation (Pre-compiled Releases)
@@ -33,10 +53,10 @@ Ready-to-use binaries are available on the [Releases](../../releases) page.
 3. Execute `SharpMark.exe`. No installation is required.
 
 ### Linux (Debian / Ubuntu)
-1. Download the `.deb` package (e.g., `sharpmark-1.0.0-amd64.deb`) from the **Releases** tab.
-2. Open your terminal and install the package via `apt` to automatically resolve GTK3 dependencies:
+1. Download the `.deb` package (e.g., `sharpmark-2.0.0-alpha.1-amd64.deb`) from the **Releases** tab.
+2. Open your terminal and install the package via `apt` to automatically resolve Qt6 dependencies:
    ```bash
-   sudo apt install ./sharpmark-1.0.0-amd64.deb
+   sudo apt install ./sharpmark-2.0.0-alpha.1-amd64.deb
    ```
 3. Launch **SharpMark** from your desktop environment's application menu.
 
@@ -67,28 +87,29 @@ nix develop
 
 To compile the application from source, follow the instructions below.
 
+> **Note:** ONNX Runtime and ExifTool are downloaded automatically by CMake during the configure step. No manual setup is required for these dependencies.
+
 ### Dependencies
 The following tools and libraries are required to build SharpMark:
-* **C++17** compatible compiler (GCC, Clang, or MSVC)
-* **CMake** (3.15 or newer)
+* **C++20** compatible compiler (GCC, Clang, or MSVC)
+* **CMake** (3.16 or newer)
 * **Ninja** (Recommended build system)
-* **GTK3** (`libgtk-3-dev`)
+* **Qt6** (`Core`, `Gui`, `Qml`, `Quick`)
 * **LibRaw** (`libraw-dev`)
-* **libexif** (`libexif-dev`)
 
 ### Linux (Debian / Ubuntu)
 
 1. Install the required toolchain and dependencies:
    ```bash
    sudo apt update
-   sudo apt install build-essential cmake ninja-build libgtk-3-dev libraw-dev libexif-dev
+   sudo apt install build-essential cmake ninja-build libraw-dev qt6-base-dev qt6-declarative-dev
    ```
 2. Clone the repository and configure the build environment:
    ```bash
    git clone https://github.com/bluetuna42/SharpMark.git
    cd SharpMark
    mkdir build && cd build
-   
+
    cmake -G Ninja -DCMAKE_BUILD_TYPE=Release ..
    ninja
    ```
@@ -103,25 +124,40 @@ The following tools and libraries are required to build SharpMark:
    cpack -G DEB
    ```
 
-### Windows (MSYS2 / MinGW)
+### Windows (MSVC + vcpkg)
 
-For Windows environments, the project is configured to build using the **MSYS2 UCRT64** toolchain.
+For Windows environments, the project builds with the **MSVC** toolchain and uses **vcpkg** to manage native dependencies.
 
-1. Download and install [MSYS2](https://www.msys2.org/).
-2. Launch the **MSYS2 UCRT64** terminal and install the necessary packages:
-   ```bash
-   pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-gtk3 mingw-w64-ucrt-x86_64-libraw mingw-w64-ucrt-x86_64-libexif
+1. Install the prerequisites:
+   - [Visual Studio 2022](https://visualstudio.microsoft.com/) with the **Desktop development with C++** workload
+   - [CMake](https://cmake.org/download/) (3.16 or newer)
+   - [Ninja](https://ninja-build.org/)
+   - [vcpkg](https://github.com/microsoft/vcpkg) — follow its [quick-start guide](https://github.com/microsoft/vcpkg#quick-start-windows) and set the `VCPKG_ROOT` environment variable
+   - [Qt6](https://www.qt.io/download) — install the `MSVC 2022 64-bit` component and set the `CMAKE_PREFIX_PATH` to your Qt installation (e.g. `C:\Qt\6.x.x\msvc2022_64`)
+
+2. Install the native library dependency via vcpkg:
+   ```cmd
+   vcpkg install libraw:x64-windows
    ```
+
 3. Clone the repository:
    ```bash
    git clone https://github.com/bluetuna42/SharpMark.git
    cd SharpMark
    ```
-4. Execute the automated portable build script. This will compile the application and bundle it with all required GTK DLLs, image parsing libraries, themes, and icons into a standalone directory:
-   ```bash
-   ./build_portable.sh
+
+4. Configure and build:
+   ```cmd
+   cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake -DCMAKE_PREFIX_PATH=C:\Qt\6.x.x\msvc2022_64 -B build
+   cmake --build build --config Release
    ```
-5. The compiled application will be available in the `SharpMark_Portable` directory.
+
+5. Run the CMake install step to assemble the portable package. CMake will automatically bundle Qt DLLs, all vcpkg dependencies, ONNX Runtime, AI models, and ExifTool into the output directory:
+   ```cmd
+   cmake --install build
+   ```
+
+6. The self-contained portable application will be available in the `SharpMark_Portable` directory. Run `SharpMark.exe` from there — no installation required.
 
 ---
 
