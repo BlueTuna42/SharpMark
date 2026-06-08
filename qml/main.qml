@@ -820,8 +820,8 @@ Window {
 
                             Rectangle {
                                 id: itemRect
-                                width: parent.width
-                                height: parent.height
+                                width: delegateRoot.width
+                                height: 45
                                 color: isLight ? "#f0f0f0" : "#2a2a2a"
                                 radius: 4
                                 border.color: popupBorder
@@ -839,21 +839,11 @@ Window {
                                     anchors.fill: parent
                                     anchors.margins: 8
 
-                                    Item {
-                                        width: 24
-                                        height: parent.height
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: "≡"
-                                            color: isLight ? "#888" : "#666"
-                                            font.pixelSize: 18
-                                        }
-                                        MouseArea {
-                                            id: dragArea
-                                            anchors.fill: parent
-                                            drag.target: itemRect
-                                            drag.axis: Drag.YAxis
-                                        }
+                                    Text {
+                                        text: "≡"
+                                        color: isLight ? "#888" : "#666"
+                                        font.pixelSize: 18
+                                        Layout.alignment: Qt.AlignVCenter
                                     }
 
                                     CheckBox {
@@ -871,22 +861,44 @@ Window {
                                     }
                                 }
 
+                                // Drag handle covers the full card — checkbox still works
+                                // because CheckBox has its own MouseArea that accepts the press
+                                // before this one sees it (z-order / child priority).
+                                MouseArea {
+                                    id: dragArea
+                                    anchors.fill: parent
+                                    propagateComposedEvents: true
+                                    drag.target: itemRect
+                                    drag.axis: Drag.YAxis
+                                    drag.threshold: 6
+                                    onClicked: mouse.accepted = false
+                                    onPositionChanged: function(mouse) {
+                                        if (drag.active)
+                                            itemRect.y = Math.max(0, Math.min(itemRect.y, pipelineList.height - itemRect.height))
+                                    }
+                                }
+
                                 states: [
                                     State {
                                         when: dragArea.drag.active
                                         ParentChange { target: itemRect; parent: pipelineList }
-                                        AnchorChanges { target: itemRect; anchors.horizontalCenter: undefined; anchors.verticalCenter: undefined }
-                                        PropertyChanges { target: itemRect; opacity: 0.8; z: 10 }
+                                        AnchorChanges {
+                                            target: itemRect
+                                            anchors.horizontalCenter: undefined
+                                            anchors.verticalCenter: undefined
+                                        }
+                                        PropertyChanges {
+                                            target: itemRect
+                                            width: pipelineList.width
+                                            height: 45
+                                            opacity: 0.8
+                                            z: 10
+                                        }
                                     }
                                 ]
                             }
                         }
-                    } 
-                } 
-
-                
-                Item { 
-                    Layout.fillHeight: true 
+                    }
                 }
             }
         } 
@@ -923,15 +935,14 @@ Window {
                 StyledButton {
                     text: "Settings"
                     onClicked: settingsPopup.open()
-                }     
-                Item { Layout.fillWidth: true }
+                }
 
-                // Status badge
+                // Status badge — fills remaining space, shrinks gracefully
                 Rectangle {
+                    Layout.fillWidth: true
                     readonly property bool isScanning:  backend.statusText === "Scanning..."
                     readonly property bool isFinished:  backend.statusText === "Finished"
                     readonly property bool isCancelled: backend.statusText === "Cancelled"
-                    readonly property bool isIdle:      !isScanning && !isFinished && !isCancelled
 
                     readonly property color accentColor:
                         isScanning  ? "#0078d4" :
@@ -944,35 +955,28 @@ Window {
                     color: Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.12)
                     border.color: Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.45)
                     border.width: 1
-
-                    implicitWidth: badgeRow.implicitWidth + 24
+                    clip: true
 
                     Behavior on color        { ColorAnimation { duration: 200 } }
                     Behavior on border.color { ColorAnimation { duration: 200 } }
 
-                    Row {
-                        id: badgeRow
+                    Text {
                         anchors.centerIn: parent
-                        spacing: 8
+                        font.pixelSize: 13
+                        font.weight: Font.Medium
+                        color: parent.accentColor
 
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            font.pixelSize: 13
-                            font.weight: Font.Medium
-                            color: parent.parent.accentColor
+                        readonly property bool scanning: parent.isScanning
+                        readonly property int  pct:
+                            backend.totalFiles > 0
+                                ? Math.round(backend.progress / backend.totalFiles * 100)
+                                : 0
 
-                            readonly property bool scanning: parent.parent.isScanning
-                            readonly property int  pct:
-                                backend.totalFiles > 0
-                                    ? Math.round(backend.progress / backend.totalFiles * 100)
-                                    : 0
+                        text: scanning
+                            ? backend.progress + " / " + backend.totalFiles + "  (" + pct + "%)"
+                            : backend.statusText
 
-                            text: scanning
-                                ? backend.progress + " / " + backend.totalFiles + "  (" + pct + "%)"
-                                : backend.statusText
-
-                            Behavior on color { ColorAnimation { duration: 200 } }
-                        }
+                        Behavior on color { ColorAnimation { duration: 200 } }
                     }
                 }
             }
@@ -990,44 +994,42 @@ Window {
                 }
 
                 StyledComboBox {
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 60
                     model: ["Mosaic Grid", "Detailed List"]
                     currentIndex: isGridView ? 0 : 1
-                    onActivated: {
-                        isGridView = (currentIndex === 0)
-                    }
+                    onActivated: isGridView = (currentIndex === 0)
                 }
-                
+
                 Rectangle {
                     width: 1
                     height: 20
                     color: popupBorder
-                    Layout.margins: 10
                 }
-                
+
                 Text {
-                    text: "Sort order:"
+                    text: "Sort:"
                     color: isLight ? "#666" : "#aaa"
                     font.pixelSize: 13
                     Layout.alignment: Qt.AlignVCenter
                 }
-                
+
                 StyledComboBox {
-                    model: ["Default Scan Order", "Best First", "Worst First"]
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 60
+                    model: ["Default", "Best First", "Worst First"]
                     currentIndex: backend.burstProxy.sortMode
-                    onActivated: {
-                        backend.burstProxy.sortMode = currentIndex
-                    }
+                    onActivated: backend.burstProxy.sortMode = currentIndex
                 }
 
                 Rectangle {
                     width: 1
                     height: 20
                     color: popupBorder
-                    Layout.margins: 10
                 }
 
                 Text {
-                    text: "Color LUT:"
+                    text: "LUT:"
                     color: isLight ? "#666" : "#aaa"
                     font.pixelSize: 13
                     Layout.alignment: Qt.AlignVCenter
@@ -1035,6 +1037,8 @@ Window {
 
                 StyledComboBox {
                     id: lutCombo
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 60
                     property var lutList: backend.availableLuts
                     model: {
                         var list = ["None"]
@@ -1061,6 +1065,7 @@ Window {
 
                 StyledButton {
                     text: "Load .cube..."
+                    Layout.minimumWidth: 0
                     onClicked: lutFileDialog.open()
                 }
 
@@ -1068,12 +1073,8 @@ Window {
                     id: lutFileDialog
                     title: "Select 3D LUT File"
                     nameFilters: ["CUBE LUT files (*.cube *.CUBE)", "All files (*)"]
-                    onAccepted: {
-                        backend.loadLutFile(selectedFile)
-                    }
+                    onAccepted: backend.loadLutFile(selectedFile)
                 }
-                
-                Item { Layout.fillWidth: true }
             }
 
             // Selection action bar — visible when items are selected

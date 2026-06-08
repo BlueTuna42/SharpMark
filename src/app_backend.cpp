@@ -153,7 +153,12 @@ QString AppBackend::getLutsDir() const {
 QStringList AppBackend::availableLuts() const {
     QDir dir(getLutsDir());
     QStringList filters; filters << "*.cube" << "*.CUBE";
-    return dir.entryList(filters, QDir::Files, QDir::Name);
+    QStringList files = dir.entryList(filters, QDir::Files, QDir::Name);
+    QStringList names;
+    names.reserve(files.size());
+    for (const QString &f : files)
+        names << QFileInfo(f).completeBaseName();
+    return names;
 }
 
 void AppBackend::loadLutFile(const QString& rawPath) {
