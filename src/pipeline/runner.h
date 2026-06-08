@@ -43,6 +43,8 @@ public:
                 // Try Cache
                 if (p->tryProcessFromCache(ctx, result)) {
                     result.processorsRun.push_back(p->name() + " (cached)");
+                    // If the state cache loaded a complete result, skip all remaining processors
+                    if (result.sharedData.count("loaded_from_state")) break;
                     continue;
                 }
 

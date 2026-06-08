@@ -12,10 +12,24 @@ public:
     std::string name() const override { return "exposure_check"; }
     bool supports(const ProcessingContext& ctx) const override { return true; }
 
-    // Exposure check is fast enough we don't necessarily need to cache it, 
-    // but you could add cache reading here if desired.
     bool tryProcessFromCache(const ProcessingContext& ctx, ProcessingResult& result) override {
-        return false; 
+        // StateCacheProcessor restores underexposed_pct / overexposed_pct into sharedData
+        // when it finds a cached entry. If those keys are present the pixel scan is not needed.
+        auto it_u = result.sharedData.find("underexposed_pct");
+        auto it_o = result.sharedData.find("overexposed_pct");
+        if (it_u == result.sharedData.end() || it_o == result.sharedData.end()) return false;
+
+        auto* underPct = std::get_if<double>(&it_u->second);
+        auto* overPct  = std::get_if<double>(&it_o->second);
+        if (!underPct || !overPct) return false;
+
+        // Re-populate metrics so the UI still sees per-image exposure values
+        result.metrics.push_back({"Underexposed", *underPct});
+        result.metrics.push_back({"Overexposed",  *overPct});
+
+        // Rejection state is already set by StateCacheProcessor (result.rejected /
+        // result.rejectReason), so nothing more to do here.
+        return true;
     }
 
     void process(std::unique_ptr<GrayscaleImage>& image, const ProcessingContext& ctx, ProcessingResult& result) override {

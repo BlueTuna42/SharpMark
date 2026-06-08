@@ -38,7 +38,7 @@ public:
         // Initialize with default tools
         m_steps.push_back({"exposure", "Exposure Check", true});
         m_steps.push_back({"laplacian", "Laplacian Focus Check", true});
-        m_steps.push_back({"ai_aesthetic", "AI Aesthetic Scorer", true});
+        m_steps.push_back({"aiaesthetic", "AI Aesthetic Scorer", true});
     }
 
     void clear() {

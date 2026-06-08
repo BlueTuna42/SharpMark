@@ -85,8 +85,6 @@ PipelineRunner AppBackend::createPipeline() {
 
     // Always add state cache first (infrastructure)
     runner.addProcessor(std::make_unique<StateCacheProcessor>());
-    // Second state cache check after preprocessors have run
-    runner.addProcessor(std::make_unique<StateCacheProcessor>());
 
     const auto& steps = m_pipelineModel.getSteps();
     for (const auto& step : steps) {
@@ -935,7 +933,15 @@ int AppBackend::rawAnalysisMode() const { return m_rawAnalysisMode; }
 void AppBackend::setRawAnalysisMode(int mode) { if (m_rawAnalysisMode != mode) { m_rawAnalysisMode = mode; saveSettings(); emit rawAnalysisModeChanged(); } }
 
 void AppBackend::selectFolder(const QString &folderPath) {
-    if (m_isScanning) return;
+    // Cancel any in-progress scan and wait for the thread to fully exit before
+    // touching m_files or m_hashes — prevents a data race with the burst-grouping
+    // tail of runScannerTask() that still reads both containers after workers join.
+    if (m_isScanning) {
+        m_cancelRequested = true;
+    }
+    if (m_scanThread.joinable()) {
+        m_scanThread.join();
+    }
 
     QString cleanPath = QUrl::fromPercentEncoding(folderPath.toUtf8());
 #ifdef Q_OS_WIN
@@ -1027,12 +1033,29 @@ void AppBackend::runScannerTask() {
                         std::string hashStr = std::get<std::string>(metric.value);
                         try {
                             currentHash = std::stoull(hashStr, nullptr, 16);
-                            //qDebug() << "Extracted hash:" << QString::fromStdString(hashStr) << "for" << QString::fromStdString(file);
                         } catch (...) {
                             currentHash = 0;
                         }
                     }
                 }
+
+                    // Fallback: on a cache-hit the score is in sharedData, not metrics
+                    if (aestheticScore == 0.0f) {
+                        auto it = result.sharedData.find("aesthetic_score");
+                        if (it != result.sharedData.end()) {
+                            if (auto* d = std::get_if<double>(&it->second))
+                                aestheticScore = static_cast<float>(*d);
+                        }
+                    }
+
+                    // Fallback: on a cache-hit the visual hash is in sharedData
+                    if (currentHash == 0) {
+                        auto it = result.sharedData.find("visual_hash_u64");
+                        if (it != result.sharedData.end()) {
+                            if (auto* d = std::get_if<double>(&it->second))
+                                currentHash = static_cast<uint64_t>(*d);
+                        }
+                    }
 
                 // Store hash in the thread-safe array
                 m_hashes[idx] = currentHash;
