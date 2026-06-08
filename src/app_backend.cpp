@@ -749,7 +749,6 @@ void AppBackend::loadSettings() {
 
             if (key == "themeMode") m_themeMode = value.toInt();
             else if (key == "writeExif") m_writeExif = (value == "1");
-            else if (key == "cacheLaplacian") m_cacheLaplacian = (value == "1");
             else if (key == "rawViewMode") m_rawViewMode = value.toInt();
             else if (key == "rawAnalysisMode") m_rawAnalysisMode = value.toInt();
             else if (key == "groupBursts") m_groupBursts = (value == "1");
@@ -847,7 +846,6 @@ void AppBackend::saveSettings() {
     QTextStream out(&qf);
     out << "themeMode="      << m_themeMode                  << "\n";
     out << "writeExif="      << (m_writeExif ? 1 : 0)        << "\n";
-    out << "cacheLaplacian=" << (m_cacheLaplacian ? 1 : 0)   << "\n";
     out << "rawViewMode="    << m_rawViewMode                 << "\n";
     out << "rawAnalysisMode="<< m_rawAnalysisMode             << "\n";
     out << "groupBursts="    << (m_groupBursts ? 1 : 0)      << "\n";
@@ -878,9 +876,6 @@ void AppBackend::setThemeMode(int mode) { if (m_themeMode != mode) { m_themeMode
 
 bool AppBackend::writeExif() const { return m_writeExif; }
 void AppBackend::setWriteExif(bool write) { if (m_writeExif != write) { m_writeExif = write; saveSettings(); emit writeExifChanged(); } }
-
-bool AppBackend::cacheLaplacian() const { return m_cacheLaplacian; }
-void AppBackend::setCacheLaplacian(bool cache) { if (m_cacheLaplacian != cache) { m_cacheLaplacian = cache; saveSettings(); emit cacheLaplacianChanged(); } }
 
 int AppBackend::rawViewMode() const { return m_rawViewMode; }
 void AppBackend::setRawViewMode(int mode) { if (m_rawViewMode != mode) { m_rawViewMode = mode; saveSettings(); emit rawViewModeChanged(); } }
@@ -1064,6 +1059,10 @@ void AppBackend::cancelScan() {
 
 bool AppBackend::trashFile(const QString &filePath) {
     return QFile::moveToTrash(filePath);
+}
+
+QString AppBackend::logFilePath() const {
+    return QCoreApplication::applicationDirPath() + "/sharpmark_debug.log";
 }
 
 // --- Properties getters/setters ---

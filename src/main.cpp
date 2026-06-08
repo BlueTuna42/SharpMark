@@ -25,15 +25,53 @@
 #include "qt_gui/thumbnail_provider.h"
 #include "qt_gui/full_image_provider.h"
 
+// Returns the absolute path to sharpmark_debug.log (next to the executable).
+static QString logFilePath() {
+    static QString path = []() -> QString {
+#ifdef _WIN32
+        wchar_t buf[32768];
+        DWORD len = GetModuleFileNameW(nullptr, buf, 32768);
+        if (len > 0) {
+            std::filesystem::path exePath(std::wstring(buf, len));
+            return QString::fromStdWString((exePath.parent_path() / "sharpmark_debug.log").wstring());
+        }
+#endif
+        return QString("sharpmark_debug.log");
+    }();
+    return path;
+}
+
+// Rotate log: if file exceeds maxBytes, discard the oldest half.
+static void rotateLogIfNeeded(QFile &file, qint64 maxBytes = 5 * 1024 * 1024) {
+    if (file.size() < maxBytes) return;
+
+    file.seek(0);
+    QByteArray all = file.readAll();
+
+    // Find a newline near the midpoint so we don't cut a line in two
+    qint64 mid = all.size() / 2;
+    qint64 cut = all.indexOf('\n', mid);
+    if (cut < 0) cut = mid;
+    else cut += 1; // keep the newline in the discarded half, start fresh after it
+
+    QByteArray kept = all.mid(cut);
+    file.resize(0);
+    file.seek(0);
+    file.write(kept);
+    file.flush();
+}
+
 void customMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg) {
-    static QFile outFile("sharpmark_debug.log");
+    static QFile outFile(logFilePath());
     if (!outFile.isOpen()) {
-        outFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text);
+        outFile.open(QIODevice::ReadWrite | QIODevice::Append | QIODevice::Text);
     }
+
+    rotateLogIfNeeded(outFile);
 
     QTextStream ts(&outFile);
     QString timeStr = QDateTime::currentDateTime().toString("hh:mm:ss.zzz");
-    
+
     QString typeStr;
     switch (type) {
         case QtDebugMsg:    typeStr = "[DEBUG]   "; break;
@@ -50,7 +88,7 @@ void customMessageHandler(QtMsgType type, const QMessageLogContext &context, con
     }
 
     QString finalLog = QString("%1 %2 %3%4\n").arg(timeStr, typeStr, contextStr, msg);
-    
+
     ts << finalLog;
     ts.flush();
     outFile.flush();

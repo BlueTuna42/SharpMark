@@ -318,9 +318,6 @@ Window {
                 Text { text: "Write EXIF rating:"; color: textColor }
                 CheckBox { checked: backend.writeExif; onCheckedChanged: backend.writeExif = checked }
 
-                Text { text: "Cache Laplacian data:"; color: textColor }
-                CheckBox { checked: backend.cacheLaplacian; onCheckedChanged: backend.cacheLaplacian = checked }
-
                 Text { text: "RAW View Quality:"; color: textColor }
                 ComboBox {
                     model: ["Thumbnail (Fastest)", "Half size", "Full size"]
@@ -336,9 +333,20 @@ Window {
                     onActivated: backend.rawAnalysisMode = currentIndex
                     Layout.fillWidth: true
                 }
+
+                Text { text: "Debug log:"; color: textColor }
+                StyledButton {
+                    text: "Open Log Location"
+                    onClicked: {
+                        var logPath = backend.logFilePath()
+                        var folderUrl = "file:///" + logPath.replace(/\\/g, "/").replace(/\/[^/]+$/, "/")
+                        Qt.openUrlExternally(folderUrl)
+                    }
+                }
             }
             Item { Layout.fillHeight: true }
-            StyledButton { text: "Close"; Layout.alignment: Qt.AlignHCenter; onClicked: settingsPopup.close() }
+
+            StyledButton { text: "OK"; Layout.alignment: Qt.AlignHCenter; onClicked: settingsPopup.close() }
         }
     }
     

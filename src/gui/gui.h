@@ -9,7 +9,6 @@ struct AppSettings {
     bool writeExif = false;
     int rawAnalysisMode = 0; // 0: Thumb, 1: Half size, 2: Full size
     int rawViewMode = 0;     // 0: Thumb, 1: Half size, 2: Full size
-    bool cacheLaplacian = false;
 };
 
 class VisualGUI {

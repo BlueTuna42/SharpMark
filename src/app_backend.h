@@ -357,7 +357,7 @@ class AppBackend : public QObject {
     // Settings Properties
     Q_PROPERTY(int themeMode READ themeMode WRITE setThemeMode NOTIFY themeModeChanged)
     Q_PROPERTY(bool writeExif READ writeExif WRITE setWriteExif NOTIFY writeExifChanged)
-    Q_PROPERTY(bool cacheLaplacian READ cacheLaplacian WRITE setCacheLaplacian NOTIFY cacheLaplacianChanged)
+
     Q_PROPERTY(int rawViewMode READ rawViewMode WRITE setRawViewMode NOTIFY rawViewModeChanged)
     Q_PROPERTY(int rawAnalysisMode READ rawAnalysisMode WRITE setRawAnalysisMode NOTIFY rawAnalysisModeChanged)
     Q_PROPERTY(QString histogramBase64 READ histogramBase64 NOTIFY histogramUpdated)
@@ -379,6 +379,8 @@ public:
     Q_INVOKABLE QVariantMap getPhotoMetadata(const QString& filePath);
     Q_INVOKABLE int getPhotoRating(const QString& filePath);
     Q_INVOKABLE void setPhotoRating(const QString& filePath, int rating, float baseScore = 0.0f);
+
+    Q_INVOKABLE QString logFilePath() const;
 
     // LUT management
     Q_INVOKABLE void loadLutFile(const QString& filePath);
@@ -411,9 +413,6 @@ public:
     bool writeExif() const; 
     void setWriteExif(bool write);
     
-    bool cacheLaplacian() const; 
-    void setCacheLaplacian(bool cache);
-    
     int rawViewMode() const; 
     void setRawViewMode(int mode);
     
@@ -438,7 +437,6 @@ signals:
     
     void themeModeChanged();
     void writeExifChanged();
-    void cacheLaplacianChanged();
     void rawViewModeChanged();
     void rawAnalysisModeChanged();
 
@@ -471,7 +469,6 @@ private:
     // Settings Variables
     int m_themeMode = 0;
     bool m_writeExif = false;
-    bool m_cacheLaplacian = false;
     int m_rawViewMode = 0;
     int m_rawAnalysisMode = 0;
 
