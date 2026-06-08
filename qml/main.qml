@@ -33,6 +33,55 @@ Window {
     property bool pipelineVisible: false // Property for the left sidebar
     property bool groupBursts: backend.groupBursts
 
+    // --- Multi-select state ---
+    property var selectedPaths: ({})   // object used as a set: { filePath: true }
+    property int selectedCount: 0
+    property int lastClickedProxyIndex: -1   // for Shift-range selection
+
+    function selectSingle(filePath, proxyIndex) {
+        selectedPaths = {}
+        var obj = {}
+        obj[filePath] = true
+        selectedPaths = obj
+        selectedCount = 1
+        lastClickedProxyIndex = proxyIndex
+    }
+
+    function toggleOne(filePath, proxyIndex) {
+        var obj = Object.assign({}, selectedPaths)
+        if (obj[filePath]) {
+            delete obj[filePath]
+            selectedCount--
+        } else {
+            obj[filePath] = true
+            selectedCount++
+        }
+        selectedPaths = obj
+        lastClickedProxyIndex = proxyIndex
+    }
+
+    function selectRange(toProxyIndex) {
+        if (lastClickedProxyIndex < 0) return
+        var from = Math.min(lastClickedProxyIndex, toProxyIndex)
+        var to   = Math.max(lastClickedProxyIndex, toProxyIndex)
+        var obj = Object.assign({}, selectedPaths)
+        for (var i = from; i <= to; i++) {
+            var sourceRow = backend.burstProxy.mapToSourceRow(i)
+            if (sourceRow >= 0 && sourceRow < resultsModel.count) {
+                obj[resultsModel.get(sourceRow).filePath] = true
+            }
+        }
+        selectedPaths = obj
+        selectedCount = Object.keys(selectedPaths).length
+        // lastClickedProxyIndex stays as the anchor
+    }
+
+    function clearSelection() {
+        selectedPaths = {}
+        selectedCount = 0
+        lastClickedProxyIndex = -1
+    }
+
     function toggleGroupExpansion(proxyIndex) {
         let sourceIndex = backend.burstProxy.mapToSourceRow(proxyIndex)
         let expandedState = !resultsModel.get(sourceIndex).isExpanded
@@ -47,6 +96,20 @@ Window {
     Component.onCompleted: {
         backend.burstProxy.source = resultsModel
         backend.burstProxy.groupBursts = Qt.binding(() => mainWindow.groupBursts)
+    }
+
+    Shortcut {
+        sequence: "Escape"
+        context: Qt.ApplicationShortcut
+        enabled: mainWindow.selectedCount > 0
+        onActivated: mainWindow.clearSelection()
+    }
+
+    Shortcut {
+        sequence: "Delete"
+        context: Qt.ApplicationShortcut
+        enabled: mainWindow.selectedCount > 0 && !viewerWindow.visible
+        onActivated: trashMultiConfirmDialog.openForSelection()
     }
 
     component StyledButton : Button {
@@ -307,6 +370,49 @@ Window {
                 }
             }
             targetIndex = -1;
+        }
+    }
+
+    MessageDialog {
+        id: trashMultiConfirmDialog
+        title: "Move to Trash"
+        buttons: MessageDialog.Yes | MessageDialog.No
+
+        property var pathsToTrash: []
+
+        function openForSelection() {
+            pathsToTrash = Object.keys(mainWindow.selectedPaths)
+            var n = pathsToTrash.length
+            text = "Are you sure you want to move " + n + " selected photo" + (n !== 1 ? "s" : "") + " to the system Trash?"
+            open()
+        }
+
+        onButtonClicked: function(button, role) {
+            if (button === MessageDialog.Yes) {
+                // Collect source indices to remove (must map through proxy)
+                var indicesToRemove = []
+                for (var i = 0; i < pathsToTrash.length; i++) {
+                    var fp = pathsToTrash[i]
+                    backend.trashFile(fp)
+                    // Find the source index in resultsModel
+                    for (var j = 0; j < resultsModel.count; j++) {
+                        if (resultsModel.get(j).filePath === fp) {
+                            indicesToRemove.push(j)
+                            break
+                        }
+                    }
+                }
+                // Remove in reverse order so indices stay valid
+                indicesToRemove.sort(function(a, b) { return b - a })
+                for (var k = 0; k < indicesToRemove.length; k++) {
+                    resultsModel.remove(indicesToRemove[k])
+                }
+                mainWindow.clearSelection()
+                if (resultsModel.count === 0) {
+                    viewerWindow.close()
+                }
+            }
+            pathsToTrash = []
         }
     }
 
@@ -574,8 +680,9 @@ Window {
         Shortcut { sequence: "Left"; onActivated: if (viewerWindow.currentIndex > 0) viewerWindow.currentIndex-- }
         Shortcut { sequence: "Right"; onActivated: if (viewerWindow.currentIndex < backend.burstProxy.count - 1) viewerWindow.currentIndex++ }
         Shortcut { sequence: "Escape"; onActivated: viewerWindow.close() }
-        Shortcut { 
-            sequence: "Delete" 
+        Shortcut {
+            sequence: "Delete"
+            enabled: viewerWindow.visible
             onActivated: {
                 trashConfirmDialog.targetIndex = viewerWindow.currentIndex;
                 trashConfirmDialog.open();
@@ -969,6 +1076,69 @@ Window {
                 Item { Layout.fillWidth: true }
             }
 
+            // Selection action bar — visible when items are selected
+            Rectangle {
+                Layout.fillWidth: true
+                height: 40
+                visible: mainWindow.selectedCount > 0
+                color: isLight ? "#e3f0ff" : "#003366"
+                radius: 6
+                border.color: isLight ? "#99c2ff" : "#0055bb"
+                border.width: 1
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 12
+                    anchors.rightMargin: 12
+                    spacing: 12
+
+                    Text {
+                        text: mainWindow.selectedCount + " image" + (mainWindow.selectedCount !== 1 ? "s" : "") + " selected"
+                        color: isLight ? "#003399" : "#99ccff"
+                        font.pixelSize: 13
+                        font.weight: Font.Medium
+                        Layout.fillWidth: true
+                    }
+
+                    Button {
+                        id: deleteSelectedBtn
+                        text: "Move to Trash"
+                        hoverEnabled: true
+                        onClicked: trashMultiConfirmDialog.openForSelection()
+
+                        contentItem: Text {
+                            text: deleteSelectedBtn.text
+                            font.pixelSize: 13
+                            font.weight: Font.Bold
+                            color: "#ffffff"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+
+                        background: Rectangle {
+                            implicitWidth: deleteSelectedBtn.contentItem.implicitWidth + 30
+                            implicitHeight: 28
+                            radius: 5
+                            color: deleteSelectedBtn.down ? "#b71c1c" : (deleteSelectedBtn.hovered ? "#e53935" : "#c62828")
+                            border.color: "#b71c1c"
+                            border.width: 1
+                            Behavior on color { ColorAnimation { duration: 100 } }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            acceptedButtons: Qt.NoButton
+                        }
+                    }
+
+                    StyledButton {
+                        text: "Deselect All"
+                        onClicked: mainWindow.clearSelection()
+                    }
+                }
+            }
+
             // 3-segment quality bar: green (accepted) | red (rejected) | grey (unscanned)
             Rectangle {
                 Layout.fillWidth: true
@@ -1040,18 +1210,33 @@ Window {
 
                         // --- THE ACTUAL CARD ---
                         Rectangle {
+                            id: gridCard
                             width: 200
                             height: 240
                             anchors.centerIn: parent // Centers the card inside the 220x260 cell
-                            
+
+                            readonly property bool itemSelected: !!mainWindow.selectedPaths[model.filePath]
+
                             color: model.status === "WAITING" ? cardWaitingBg : (model.isRejected ? cardBlurryBg : cardSharpBg)
                             radius: 6
-                            border.color: model.status === "WAITING" ? cardWaitingBorder : (model.isRejected ? cardBlurryBorder : cardSharpBorder)
-                            border.width: 1
+                            border.color: itemSelected ? "#0066cc"
+                                        : (model.status === "WAITING" ? cardWaitingBorder : (model.isRejected ? cardBlurryBorder : cardSharpBorder))
+                            border.width: itemSelected ? 3 : 1
 
                             MouseArea {
                                 anchors.fill: parent
-                                onClicked: {
+                                acceptedButtons: Qt.LeftButton
+                                onClicked: function(mouse) {
+                                    if (mouse.modifiers & Qt.ControlModifier) {
+                                        mainWindow.toggleOne(model.filePath, index)
+                                    } else if (mouse.modifiers & Qt.ShiftModifier) {
+                                        mainWindow.selectRange(index)
+                                    } else {
+                                        mainWindow.selectSingle(model.filePath, index)
+                                    }
+                                }
+                                onDoubleClicked: {
+                                    mainWindow.clearSelection()
                                     viewerWindow.currentIndex = index
                                     viewerWindow.show()
                                 }
@@ -1093,6 +1278,38 @@ Window {
                                     color: model.status === "WAITING" ? cardWaitingText : (model.isRejected ? cardBlurryText : cardSharpText)
                                     font.bold: true
                                     font.pixelSize: 12
+                                }
+                            }
+
+                            // SELECTION OVERLAY
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: parent.radius
+                                color: "#330066cc"
+                                visible: gridCard.itemSelected
+                                z: 5
+                            }
+
+                            // SELECTION CHECKMARK — always shown so user knows items are clickable
+                            Rectangle {
+                                anchors.bottom: parent.bottom
+                                anchors.right: parent.right
+                                anchors.margins: 8
+                                width: 22
+                                height: 22
+                                radius: 11
+                                color: gridCard.itemSelected ? "#0066cc" : "transparent"
+                                border.color: gridCard.itemSelected ? "#ffffff" : (isLight ? "#aaaaaa" : "#777777")
+                                border.width: 2
+                                z: 10
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "\u2713"
+                                    color: "white"
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                    visible: gridCard.itemSelected
                                 }
                             }
 
@@ -1174,18 +1391,33 @@ Window {
 
                         // --- THE ACTUAL CARD ---
                         Rectangle {
+                            id: listCard
                             width: parent.width - 16
                             height: 60
                             anchors.centerIn: parent
-                            
+
+                            readonly property bool itemSelected: !!mainWindow.selectedPaths[model.filePath]
+
                             color: model.status === "WAITING" ? cardWaitingBg : (model.isRejected ? cardBlurryBg : cardSharpBg)
                             radius: 4
-                            border.color: model.status === "WAITING" ? cardWaitingBorder : (model.isRejected ? cardBlurryBorder : cardSharpBorder)
-                            border.width: 1
+                            border.color: itemSelected ? "#0066cc"
+                                        : (model.status === "WAITING" ? cardWaitingBorder : (model.isRejected ? cardBlurryBorder : cardSharpBorder))
+                            border.width: itemSelected ? 3 : 1
 
                             MouseArea {
                                 anchors.fill: parent
-                                onClicked: {
+                                acceptedButtons: Qt.LeftButton
+                                onClicked: function(mouse) {
+                                    if (mouse.modifiers & Qt.ControlModifier) {
+                                        mainWindow.toggleOne(model.filePath, index)
+                                    } else if (mouse.modifiers & Qt.ShiftModifier) {
+                                        mainWindow.selectRange(index)
+                                    } else {
+                                        mainWindow.selectSingle(model.filePath, index)
+                                    }
+                                }
+                                onDoubleClicked: {
+                                    mainWindow.clearSelection()
                                     viewerWindow.currentIndex = index
                                     viewerWindow.show()
                                 }
@@ -1195,6 +1427,26 @@ Window {
                                 anchors.fill: parent
                                 anchors.margins: 5
                                 spacing: 15
+
+                                // SELECTION CHECKBOX (list view)
+                                Rectangle {
+                                    width: 22
+                                    height: 22
+                                    radius: 11
+                                    color: listCard.itemSelected ? "#0066cc" : "transparent"
+                                    border.color: listCard.itemSelected ? "#ffffff" : (isLight ? "#aaaaaa" : "#777777")
+                                    border.width: 2
+                                    Layout.leftMargin: 4
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "\u2713"
+                                        color: "white"
+                                        font.pixelSize: 13
+                                        font.bold: true
+                                        visible: listCard.itemSelected
+                                    }
+                                }
 
                                 Image {
                                     Layout.preferredWidth: 70
@@ -1230,6 +1482,15 @@ Window {
                                     Layout.alignment: Qt.AlignRight
                                     Layout.rightMargin: 10
                                 }
+                            }
+
+                            // SELECTION OVERLAY
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: parent.radius
+                                color: "#330066cc"
+                                visible: listCard.itemSelected
+                                z: 5
                             }
                         }
                     }
