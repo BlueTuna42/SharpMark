@@ -39,10 +39,18 @@ public:
         int underExposedCount = 0;
         int overExposedCount = 0;
 
+        const int ch = image->channels;
         for (int i = 0; i < totalPixels; ++i) {
-            unsigned char px = image->data[i];
-            if (px <= 5) underExposedCount++;     // Near pure black
-            if (px >= 250) overExposedCount++;    // Near pure white
+            float luma;
+            if (ch == 1) {
+                luma = image->data[i];
+            } else {
+                // BT.601 luma from RGB (values are in 0–255 float range)
+                const float* px = image->data + i * ch;
+                luma = 0.299f * px[0] + 0.587f * px[1] + 0.114f * px[2];
+            }
+            if (luma <= 5.0f)   underExposedCount++;
+            if (luma >= 250.0f) overExposedCount++;
         }
 
         float underPct = static_cast<float>(underExposedCount) / totalPixels;
