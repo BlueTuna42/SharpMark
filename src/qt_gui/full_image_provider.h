@@ -85,8 +85,11 @@ public:
         
         qDebug() << "======================================";
 
-        // Apply 3D LUT for viewer colour correction (only in half/full RAW decode modes)
-        image = m_backend->applyViewerLut(image);
+        // Apply 3D LUT for viewer colour correction.
+        bool isRawThumbnail = isRawExtension(suffix) && (m_backend->rawViewMode() == 0);
+        if (!isRawThumbnail) {
+            image = m_backend->applyViewerLut(image);
+        }
 
         m_backend->updateHistogramFromImage(image);
         return image;

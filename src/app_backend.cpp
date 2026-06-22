@@ -318,7 +318,6 @@ void AppBackend::reloadViewerLut() const {
 
 QImage AppBackend::applyViewerLut(const QImage& image) const {
     if (!m_lutEnabled || m_viewerLutData.empty()) return image;
-    if (m_rawViewMode == 0) return image;  // thumbnail mode — skip
     if (image.isNull()) return image;
     return applyLutToQImage(image, m_viewerLutData, m_viewerLutDim);
 }
