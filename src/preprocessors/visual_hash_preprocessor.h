@@ -21,27 +21,54 @@ public:
     {
         if (!image || image->width == 0 || image->height == 0) return;
 
-        // Nearest-neighbor downsample to 9×8 using the first (or only) channel
+        // Downsample to 9×8 by averaging each source block (area average).
+        // Each target cell (x, y) maps to the rectangular block of source pixels
+        // [ x*W/targetW, (x+1)*W/targetW ) × [ y*H/targetH, (y+1)*H/targetH ).
         constexpr int targetW = 9, targetH = 8;
         std::vector<unsigned char> small(targetW * targetH);
 
-        for (int y = 0; y < targetH; ++y) {
-            for (int x = 0; x < targetW; ++x) {
-                int srcX = x * image->width  / targetW;
-                int srcY = y * image->height / targetH;
+        const int W = image->width;
+        const int H = image->height;
 
-                float luma;
-                if (image->channels == 1) {
-                    luma = image->data[srcY * image->width + srcX];
-                } else {
-                    // BT.601 luma from RGB
-                    int base = (srcY * image->width + srcX) * image->channels;
-                    luma = 0.299f * image->data[base + 0]
+        for (int y = 0; y < targetH; ++y) {
+            const int y0 = y       * H / targetH;
+            const int y1 = (y + 1) * H / targetH;
+
+            for (int x = 0; x < targetW; ++x) {
+                const int x0 = x       * W / targetW;
+                const int x1 = (x + 1) * W / targetW;
+
+                float sum = 0.0f;
+                int   count = 0;
+
+                for (int sy = y0; sy < y1; ++sy) {
+                    for (int sx = x0; sx < x1; ++sx) {
+                        float luma;
+                        if (image->channels == 1) {
+                            luma = image->data[sy * W + sx];
+                        } else {
+                            // BT.601 luma from RGB
+                            int base = (sy * W + sx) * image->channels;
+                            luma = 0.299f * image->data[base + 0]
+                                 + 0.587f * image->data[base + 1]
+                                 + 0.114f * image->data[base + 2];
+                        }
+                        sum += luma;
+                        ++count;
+                    }
+                }
+
+                // Fall back to the top-left pixel if the block is degenerate
+                float avg = (count > 0) ? (sum / count) : [&]() -> float {
+                    if (image->channels == 1) return image->data[y0 * W + x0];
+                    int base = (y0 * W + x0) * image->channels;
+                    return 0.299f * image->data[base + 0]
                          + 0.587f * image->data[base + 1]
                          + 0.114f * image->data[base + 2];
-                }
+                }();
+
                 small[y * targetW + x] = static_cast<unsigned char>(
-                    std::min(255.0f, std::max(0.0f, luma)));
+                    std::min(255.0f, std::max(0.0f, avg)));
             }
         }
 
