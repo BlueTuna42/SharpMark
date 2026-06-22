@@ -87,7 +87,7 @@ Window {
         let expandedState = !resultsModel.get(sourceIndex).isExpanded
         resultsModel.setProperty(sourceIndex, "isExpanded", expandedState)
         
-        for (let i = sourceIndex + 1; i < backend.burstProxy.count; i++) {
+        for (let i = sourceIndex + 1; i < resultsModel.count; i++) {
             if (resultsModel.get(i).isLead) break;
             resultsModel.setProperty(i, "isExpanded", expandedState)
         }
