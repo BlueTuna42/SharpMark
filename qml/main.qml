@@ -723,11 +723,17 @@ Window {
                 color: popupBorder
             }
 
-            ColumnLayout {
+            ScrollView {
+                id: sidebarScroll
                 anchors.fill: parent
                 anchors.margins: 15
-                spacing: 15
                 visible: pipelineSidebar.Layout.preferredWidth > 50
+                clip: true
+                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+
+            Column {
+                width: sidebarScroll.width
+                spacing: 15
 
                 Text { text: "Pipeline Config"; color: textColor; font.bold: true; font.pixelSize: 16 }
 
@@ -743,7 +749,7 @@ Window {
 
                 ListView {
                     id: preprocessorList
-                    Layout.fillWidth: true
+                    width: parent.width
                     implicitHeight: contentHeight
                     clip: true
                     spacing: 4
@@ -768,7 +774,12 @@ Window {
                                 checked: model.enabled
                                 opacity: model.supportsDisable ? 1.0 : 0.4
                                 onCheckedChanged: {
-                                    backend.preprocessorModel.setStepEnabled(model.index, checked)
+                                    if (model.id === "visual_hash") {
+                                        // Semaphore: visual_hash and clip_embedding are mutually exclusive
+                                        backend.setGroupingMode(checked ? "visual_hash" : "none")
+                                    } else {
+                                        backend.preprocessorModel.setStepEnabled(model.index, checked)
+                                    }
                                 }
                             }
 
@@ -784,7 +795,7 @@ Window {
 
                 // Separator between preprocessors and processors
                 Rectangle {
-                    Layout.fillWidth: true
+                    width: parent.width
                     height: 1
                     color: popupBorder
                 }
@@ -802,8 +813,8 @@ Window {
 
                 ListView {
                     id: pipelineList
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
+                    width: parent.width
+                    implicitHeight: contentHeight
                     clip: true
                     spacing: 5
                     model: DelegateModel {
@@ -908,7 +919,71 @@ Window {
                         }
                     }
                 }
-            }
+
+                // Separator between processors and postprocessors
+                Rectangle {
+                    width: parent.width
+                    height: 1
+                    color: popupBorder
+                }
+
+                // ---- POSTPROCESSORS section ----
+                Text {
+                    text: "Postprocessors"
+                    color: isLight ? "#555" : "#bbb"
+                    font.pixelSize: 12
+                    font.bold: true
+                    font.capitalization: Font.AllUppercase
+                    font.letterSpacing: 0.8
+                }
+
+                ListView {
+                    id: postprocessorList
+                    width: parent.width
+                    implicitHeight: contentHeight
+                    clip: true
+                    spacing: 4
+                    interactive: false
+                    model: backend.postprocessorModel
+
+                    delegate: Rectangle {
+                        width: postprocessorList.width
+                        height: 40
+                        radius: 4
+                        color: isLight ? "#f0f0f0" : "#2a2a2a"
+                        border.color: popupBorder
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 10
+                            anchors.rightMargin: 10
+                            spacing: 8
+
+                            CheckBox {
+                                enabled: model.supportsDisable
+                                checked: model.enabled
+                                opacity: model.supportsDisable ? 1.0 : 0.4
+                                onCheckedChanged: {
+                                    if (model.id === "clip_embedding") {
+                                        // Semaphore: clip_embedding and visual_hash are mutually exclusive
+                                        backend.setGroupingMode(checked ? "clip_embedding" : "none")
+                                    } else {
+                                        backend.postprocessorModel.setStepEnabled(model.index, checked)
+                                    }
+                                }
+                            }
+
+                            Text {
+                                text: model.name
+                                color: model.enabled ? textColor : (isLight ? "#999" : "#666")
+                                Layout.fillWidth: true
+                                font.pixelSize: 13
+                            }
+                        }
+                    }
+                }
+            } // Column
+            } // ScrollView
         } 
 
                 // RIGHT SIDE Main Content

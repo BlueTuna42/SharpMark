@@ -39,6 +39,7 @@
 #include "postprocessors/state_cache.h"
 #include "preprocessors/visual_hash_preprocessor.h"
 #include "preprocessors/lut_preprocessor.h"
+#include "postprocessors/clip_embedding_postprocessor.h"
 
 
 PipelineRunner AppBackend::createPipeline() {
@@ -108,6 +109,13 @@ PipelineRunner AppBackend::createPipeline() {
     // Always add post-processors at the end (infrastructure)
     runner.addPostProcessor(std::make_unique<StateCachePostProcessor>());
 
+    // CLIP embedding writer — optional, controlled by postprocessor model
+    {
+        auto clipPost = std::make_unique<ClipEmbeddingPostProcessor>();
+        clipPost->setEnabled(m_postprocessorModel.isEnabled("clip_embedding"));
+        runner.addPostProcessor(std::move(clipPost));
+    }
+
     return runner;
 }
 
@@ -122,6 +130,9 @@ AppBackend::AppBackend(QObject *parent)
                 reloadViewerLut();
                 emit activeLutChanged();
             });
+
+    connect(&m_postprocessorModel, &PostprocessorConfigModel::postprocessorChanged,
+            this, [this]() { if (!m_loadingSettings) saveSettings(); });
 
     loadSettings();
     reloadViewerLut();
@@ -266,6 +277,32 @@ void AppBackend::selectLutPreset(const QString& name) {
     saveSettings();
     emit lutEnabledChanged();
     emit activeLutChanged();
+}
+
+void AppBackend::setGroupingMode(const QString& mode) {
+    // Semaphore: at most one of visual_hash / clip_embedding may be enabled.
+    const bool wantHash = (mode == "visual_hash");
+    const bool wantClip = (mode == "clip_embedding");
+
+    // Update preprocessor model (visual_hash lives here)
+    const auto& preSteps = m_preprocessorModel.getSteps();
+    for (int i = 0; i < static_cast<int>(preSteps.size()); ++i) {
+        if (preSteps[i].id == "visual_hash") {
+            m_preprocessorModel.setStepEnabled(i, wantHash);
+            break;
+        }
+    }
+
+    // Update postprocessor model (clip_embedding lives here)
+    const auto& postSteps = m_postprocessorModel.getSteps();
+    for (int i = 0; i < static_cast<int>(postSteps.size()); ++i) {
+        if (postSteps[i].id == "clip_embedding") {
+            m_postprocessorModel.setStepEnabled(i, wantClip);
+            break;
+        }
+    }
+
+    saveSettings();
 }
 
 void AppBackend::setLutEnabled(bool v) {
@@ -482,8 +519,8 @@ QVariantMap AppBackend::getPhotoMetadata(const QString& rawPath) {
     #else
         std::filesystem::path imgPath(cleanPath.toUtf8().constData());
     #endif
-    std::filesystem::path clipPath = imgPath.parent_path() / ".laplacian_cache" / (imgPath.filename().u8string());
-    clipPath += ".clip"; 
+    std::filesystem::path clipPath = imgPath.parent_path() / ".laplacian_cache" / (imgPath.filename().string());
+    clipPath += ".clip";
 
     if (std::filesystem::exists(clipPath)) {
         std::vector<float> clipVector(512);
@@ -782,8 +819,10 @@ void AppBackend::loadSettings() {
 
     std::vector<QString> loadedIds;
     std::vector<QString> loadedPreIds;
-    bool pipelineLoaded    = false;
-    bool preprocessorLoaded = false;
+    std::vector<QString> loadedPostIds;
+    bool pipelineLoaded      = false;
+    bool preprocessorLoaded  = false;
+    bool postprocessorLoaded = false;
 
     QFile qf(getSettingsFilePath());
     if (qf.open(QIODevice::ReadOnly | QIODevice::Text)) {
@@ -842,6 +881,25 @@ void AppBackend::loadSettings() {
                 }
                 preprocessorLoaded = true;
             }
+            else if (key == "postprocessors") {
+                m_postprocessorModel.clear();
+                const QStringList tokens = value.split(',');
+                for (const QString& token : tokens) {
+                    int colonIdx = token.indexOf(':');
+                    if (colonIdx != -1) {
+                        QString id      = token.left(colonIdx);
+                        bool    enabled = (token.mid(colonIdx + 1) == "1");
+
+                        QString name = id;
+                        bool    canDisable = true;
+                        if (id == "clip_embedding") { name = "Burst Grouping (CLIP Embedding)"; canDisable = true; }
+
+                        m_postprocessorModel.addStep(id, name, enabled, canDisable);
+                        loadedPostIds.push_back(id);
+                    }
+                }
+                postprocessorLoaded = true;
+            }
         }
         qf.close();
     }
@@ -883,6 +941,15 @@ void AppBackend::loadSettings() {
             m_preprocessorModel.setStepEnabled(i, m_lutEnabled);
     }
 
+    if (!postprocessorLoaded) {
+        m_postprocessorModel.clear();
+        m_postprocessorModel.addStep("clip_embedding", "Burst Grouping (CLIP Embedding)", false, true);
+    } else {
+        // Merge: add any missing postprocessors
+        if (std::find(loadedPostIds.begin(), loadedPostIds.end(), "clip_embedding") == loadedPostIds.end())
+            m_postprocessorModel.addStep("clip_embedding", "Burst Grouping (CLIP Embedding)", false, true);
+    }
+
     m_loadingSettings = false;
 }
 
@@ -913,6 +980,14 @@ void AppBackend::saveSettings() {
     for (size_t i = 0; i < preSteps.size(); ++i) {
         out << preSteps[i].id << ":" << (preSteps[i].enabled ? 1 : 0);
         if (i < preSteps.size() - 1) out << ",";
+    }
+    out << "\n";
+
+    out << "postprocessors=";
+    const auto& postSteps = m_postprocessorModel.getSteps();
+    for (size_t i = 0; i < postSteps.size(); ++i) {
+        out << postSteps[i].id << ":" << (postSteps[i].enabled ? 1 : 0);
+        if (i < postSteps.size() - 1) out << ",";
     }
     out << "\n";
 
@@ -959,6 +1034,7 @@ void AppBackend::selectFolder(const QString &folderPath) {
     // 1. FAST SCAN DIRECTORY IMMEDIATELY
     m_files = Scanner::scanFiles(m_currentFolder);
     m_hashes.assign(m_files.size(), 0);
+    m_clipVectors.assign(m_files.size(), {});
     setTotalFiles(static_cast<int>(m_files.size()));
     setProgress(0);
 
@@ -1005,6 +1081,7 @@ void AppBackend::runScannerTask() {
 
             ProcessingContext ctx;
             ctx.settings = settings;
+            ctx.runFullPipelineOnRejected = m_postprocessorModel.isEnabled("clip_embedding");
 
 #ifdef _WIN32
             ctx.filePath = std::filesystem::path(qFile.toStdWString());
@@ -1058,6 +1135,32 @@ void AppBackend::runScannerTask() {
 
                 // Store hash in the thread-safe array
                 m_hashes[idx] = currentHash;
+
+                // Collect CLIP embedding for CLIP-based grouping.
+                // 1. Prefer the freshly computed vector from sharedData.
+                // 2. Fall back to the .clip file on disk (cache-hit path).
+                {
+                    std::vector<float> clipVec;
+                    auto itClip = result.sharedData.find("clip_vector");
+                    if (itClip != result.sharedData.end()) {
+                        if (auto* v = std::get_if<std::vector<float>>(&itClip->second)) {
+                            if (v->size() == 512) clipVec = *v;
+                        }
+                    }
+                    if (clipVec.empty()) {
+                        // Try reading from .clip file (written on a previous scan)
+                        std::filesystem::path clipPath =
+                            ctx.cacheDir / (ctx.filePath.filename().string() + ".clip");
+                        std::ifstream cf(clipPath, std::ios::binary);
+                        if (cf) {
+                            clipVec.resize(512);
+                            cf.read(reinterpret_cast<char*>(clipVec.data()),
+                                    512 * sizeof(float));
+                            if (!cf) clipVec.clear(); // truncated file
+                        }
+                    }
+                    m_clipVectors[idx] = std::move(clipVec);
+                }
                 
                     // For Laplacian backwards compatibility, if it's blurry, mark as rejected
                     if (result.isBlurry && !result.rejected) {
@@ -1091,28 +1194,71 @@ void AppBackend::runScannerTask() {
     std::vector<int> groupLead(m_files.size(), 0);
     std::vector<int> groupSize(m_files.size(), 1);
 
-    for (size_t i = 0; i < m_files.size(); ++i) {
-        if (i == 0 || m_hashes[i] == 0 || m_hashes[lastLead] == 0) {
-            lastLead = static_cast<int>(i);
-            groupLead[i] = static_cast<int>(i);
-        } else {
-            // Compute Hamming Distance (number of differing bits)
-            uint64_t xor_val = m_hashes[i] ^ m_hashes[lastLead];
-            int dist = 0;
-            while (xor_val) { dist += xor_val & 1; xor_val >>= 1; }
+    const bool useClipGrouping = m_postprocessorModel.isEnabled("clip_embedding");
+    const bool useHashGrouping = m_preprocessorModel.isEnabled("visual_hash");
 
-            // Threshold: 10 bits difference means ~15% visual change. 
-            // This groups highly similar bursts together.
-            if (dist <= 20) {
+    if (useClipGrouping) {
+        // ---------------------------------------------------------------
+        // CLIP-cosine grouping
+        // Two images are in the same burst if cosine similarity >= 0.90.
+        // Similarity is computed against the current group lead only
+        // (same sequential O(N) pass as dHash grouping for consistency).
+        // ---------------------------------------------------------------
+        constexpr float CLIP_THRESHOLD = 0.90f;
+
+        for (size_t i = 0; i < m_files.size(); ++i) {
+            const auto& vecI = m_clipVectors[i];
+            if (i == 0 || vecI.empty() || m_clipVectors[lastLead].empty()) {
+                lastLead     = static_cast<int>(i);
+                groupLead[i] = static_cast<int>(i);
+                continue;
+            }
+
+            const auto& vecLead = m_clipVectors[lastLead];
+            // Dot product of two L2-normalised vectors == cosine similarity
+            float sim = 0.0f;
+            for (int k = 0; k < 512; ++k) sim += vecI[k] * vecLead[k];
+
+            if (sim >= CLIP_THRESHOLD) {
                 groupLead[i] = lastLead;
                 groupSize[lastLead]++;
-                qDebug() << "Grouped photo" << i << "with lead" << lastLead << "Dist:" << dist;
+                qDebug() << "[CLIP group] photo" << i << "with lead" << lastLead
+                         << "sim=" << sim;
             } else {
-                lastLead = static_cast<int>(i);
+                lastLead     = static_cast<int>(i);
                 groupLead[i] = static_cast<int>(i);
-                qDebug() << "New group lead at" << i << "Dist was:" << dist;
+                qDebug() << "[CLIP group] new lead at" << i << "sim was" << sim;
             }
         }
+    } else if (useHashGrouping) {
+        // ---------------------------------------------------------------
+        // dHash Hamming-distance grouping (original algorithm)
+        // ---------------------------------------------------------------
+        for (size_t i = 0; i < m_files.size(); ++i) {
+            if (i == 0 || m_hashes[i] == 0 || m_hashes[lastLead] == 0) {
+                lastLead     = static_cast<int>(i);
+                groupLead[i] = static_cast<int>(i);
+            } else {
+                uint64_t xor_val = m_hashes[i] ^ m_hashes[lastLead];
+                int dist = 0;
+                while (xor_val) { dist += xor_val & 1; xor_val >>= 1; }
+
+                if (dist <= 20) {
+                    groupLead[i] = lastLead;
+                    groupSize[lastLead]++;
+                    qDebug() << "[Hash group] photo" << i << "with lead" << lastLead
+                             << "dist=" << dist;
+                } else {
+                    lastLead     = static_cast<int>(i);
+                    groupLead[i] = static_cast<int>(i);
+                    qDebug() << "[Hash group] new lead at" << i << "dist was" << dist;
+                }
+            }
+        }
+    } else {
+        // No grouping — every image is its own lead
+        for (size_t i = 0; i < m_files.size(); ++i)
+            groupLead[i] = static_cast<int>(i);
     }
 
     // Emit assignments back to QML safely

@@ -38,7 +38,7 @@ public:
             for (auto& p : processors_) {
                 if (!p->supports(ctx)) continue;
 
-                if (result.rejected) break; 
+                if (result.rejected && !ctx.runFullPipelineOnRejected) break;
 
                 // Try Cache
                 if (p->tryProcessFromCache(ctx, result)) {
@@ -72,9 +72,10 @@ public:
                 }
             }
 
-            // Run multiple Post-processors
+            // Run post-processors — always-on ones (supportsDisable==false) run
+            // unconditionally; optional ones respect their enabled flag.
             for (auto& pp : postProcessors_) {
-                pp->handle(ctx, result);
+                if (pp->isEnabled()) pp->handle(ctx, result);
             }
 
         } catch (const std::exception& e) {

@@ -217,6 +217,101 @@ private:
 };
 
 
+// ---------------------------------------------------------------------------
+// PostprocessorConfigModel — drives the "Postprocessors" section in the sidebar.
+// Same structure as PreprocessorConfigModel.
+// ---------------------------------------------------------------------------
+class PostprocessorConfigModel : public QAbstractListModel {
+    Q_OBJECT
+
+signals:
+    void postprocessorChanged();
+
+public:
+    enum Roles {
+        IdRole = Qt::UserRole + 1,
+        NameRole,
+        EnabledRole,
+        SupportsDisableRole
+    };
+
+    struct Step {
+        QString id;
+        QString name;
+        bool    enabled;
+        bool    supportsDisable;
+    };
+
+    explicit PostprocessorConfigModel(QObject *parent = nullptr) : QAbstractListModel(parent) {
+        m_steps.push_back({"clip_embedding", "Burst Grouping (CLIP Embedding)", false, true});
+    }
+
+    void clear() { beginResetModel(); m_steps.clear(); endResetModel(); }
+
+    void addStep(const QString& id, const QString& name, bool enabled, bool supportsDisable) {
+        beginInsertRows(QModelIndex(), m_steps.size(), m_steps.size());
+        m_steps.push_back({id, name, enabled, supportsDisable});
+        endInsertRows();
+    }
+
+    int rowCount(const QModelIndex& parent = QModelIndex()) const override {
+        if (parent.isValid()) return 0;
+        return static_cast<int>(m_steps.size());
+    }
+
+    QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override {
+        if (!index.isValid() || index.row() >= static_cast<int>(m_steps.size()))
+            return QVariant();
+        const Step& s = m_steps[index.row()];
+        switch (role) {
+            case IdRole:              return s.id;
+            case NameRole:            return s.name;
+            case EnabledRole:         return s.enabled;
+            case SupportsDisableRole: return s.supportsDisable;
+            default:                  return QVariant();
+        }
+    }
+
+    bool setData(const QModelIndex& index, const QVariant& value, int role = Qt::EditRole) override {
+        if (!index.isValid() || index.row() >= static_cast<int>(m_steps.size())) return false;
+        if (role == EnabledRole) {
+            m_steps[index.row()].enabled = value.toBool();
+            emit dataChanged(index, index, {role});
+            return true;
+        }
+        return false;
+    }
+
+    QHash<int, QByteArray> roleNames() const override {
+        QHash<int, QByteArray> roles;
+        roles[IdRole]              = "id";
+        roles[NameRole]            = "name";
+        roles[EnabledRole]         = "enabled";
+        roles[SupportsDisableRole] = "supportsDisable";
+        return roles;
+    }
+
+    Q_INVOKABLE void setStepEnabled(int index, bool enabled) {
+        if (index >= 0 && index < static_cast<int>(m_steps.size())) {
+            m_steps[index].enabled = enabled;
+            emit dataChanged(this->index(index), this->index(index), {EnabledRole});
+            emit postprocessorChanged();
+        }
+    }
+
+    bool isEnabled(const QString& id) const {
+        for (const auto& s : m_steps)
+            if (s.id == id) return s.enabled;
+        return false;
+    }
+
+    const std::vector<Step>& getSteps() const { return m_steps; }
+
+private:
+    std::vector<Step> m_steps;
+};
+
+
 class BurstFilterProxyModel : public QSortFilterProxyModel {
     Q_OBJECT
     Q_PROPERTY(QObject* source READ source WRITE setSource NOTIFY sourceChanged)
@@ -428,6 +523,13 @@ public:
     Q_PROPERTY(PreprocessorConfigModel* preprocessorModel READ preprocessorModel CONSTANT)
     PreprocessorConfigModel* preprocessorModel() { return &m_preprocessorModel; }
 
+    Q_PROPERTY(PostprocessorConfigModel* postprocessorModel READ postprocessorModel CONSTANT)
+    PostprocessorConfigModel* postprocessorModel() { return &m_postprocessorModel; }
+
+    // Semaphore toggle: "visual_hash" | "clip_embedding" | "none"
+    // Exactly one of the two grouping algorithms can be active at a time.
+    Q_INVOKABLE void setGroupingMode(const QString& mode);
+
 signals:
     void statusTextChanged();
     void progressChanged();
@@ -492,11 +594,15 @@ private:
 
     QString m_histogramBase64;
     std::vector<uint64_t> m_hashes;
+    std::vector<std::vector<float>> m_clipVectors; // 512-float CLIP embeddings, parallel to m_files
 
     PipelineConfigModel m_pipelineModel;
 
     // Preprocessor config
     PreprocessorConfigModel m_preprocessorModel;
+
+    // Postprocessor config
+    PostprocessorConfigModel m_postprocessorModel;
 
     // LUT state
     bool            m_lutEnabled    = false;

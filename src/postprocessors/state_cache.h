@@ -64,6 +64,7 @@ private:
 
 public:
     std::string name() const override { return "state_cache_writer"; }
+    bool supportsDisable() const override { return false; } // always runs
     
     void handle(const ProcessingContext& ctx, const ProcessingResult& result) override {
         // Don't write back entries that were loaded from cache

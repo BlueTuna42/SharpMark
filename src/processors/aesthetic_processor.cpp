@@ -194,7 +194,7 @@ std::vector<Ort::Value> AestheticProcessor::runOnnxModel(Ort::Session& session, 
 }
 
 void AestheticProcessor::process(std::unique_ptr<ImageBuffer>& image, const ProcessingContext& ctx, ProcessingResult& result) {
-    qDebug() << "[AI] Starting aesthetic processing. Image:" << (ctx.filePath).u8string();
+    qDebug() << "[AI] Starting aesthetic processing. Image:" << (ctx.filePath).string();
 
     if (!image || image->channels < 3) {
         qWarning() << "[AI] Image invalid or not RGB. Channels:" << (image ? image->channels : 0);

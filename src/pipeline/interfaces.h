@@ -20,6 +20,7 @@ struct ProcessingContext {
     AppSettings settings;
     std::filesystem::path cacheDir;
     bool requireRGB = false;
+    bool runFullPipelineOnRejected = false; // Used when CLIP grouping is enabled
 };
 
 struct ProcessingResult {
@@ -53,7 +54,16 @@ class IPostProcessor {
 public:
     virtual ~IPostProcessor() = default;
     virtual std::string name() const = 0;
+
+    // Enable/disable — mirrors IImagePreprocessor.
+    // supportsDisable() == false means the entry is always-on (no UI toggle).
+    virtual bool isEnabled() const { return m_enabled; }
+    virtual void setEnabled(bool v) { m_enabled = v; }
+    virtual bool supportsDisable() const { return true; }
+
     virtual void handle(const ProcessingContext& ctx, const ProcessingResult& result) = 0;
+protected:
+    bool m_enabled = true;
 };
 
 class IImageLoader {
