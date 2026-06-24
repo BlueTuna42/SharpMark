@@ -585,6 +585,77 @@ void AppBackend::loadRatings() {
 void AppBackend::saveRatings() {
 }
 
+// ---------------------------------------------------------------------------
+// Color label helpers
+// ---------------------------------------------------------------------------
+
+static QString normalizeFilePath(const QString& rawPath) {
+    QString p = QUrl::fromPercentEncoding(rawPath.toUtf8());
+#ifdef Q_OS_WIN
+    if      (p.startsWith("file:///")) p = p.mid(8);
+    else if (p.startsWith("file://"))  p = p.mid(7);
+    else if (p.startsWith("/"))        p = p.mid(1);
+#else
+    if (p.startsWith("file://")) p = p.mid(7);
+#endif
+    return p;
+}
+
+static QString sidecarPath(const QString& cleanPath) {
+    // Standard XMP sidecar: replace extension with .xmp  (photo.cr2 -> photo.xmp)
+    QFileInfo fi(cleanPath);
+    return fi.absolutePath() + "/" + fi.completeBaseName() + ".xmp";
+}
+
+static QString sidecarOrSelf(const QString& cleanPath) {
+    QFileInfo fi(cleanPath);
+    static const QStringList rawExts = {"cr2","cr3","nef","arw","dng","raf","orf","rw2","pef","srw"};
+    if (rawExts.contains(fi.suffix().toLower())) {
+        QString sc = sidecarPath(cleanPath);
+        if (QFileInfo::exists(sc)) return sc;
+    }
+    return cleanPath;
+}
+
+QString AppBackend::getPhotoColorLabel(const QString& rawPath) {
+    QString cleanPath = normalizeFilePath(rawPath);
+    std::lock_guard<std::mutex> lk(m_metaMutex);
+    auto it = m_colorLabels.find(cleanPath);
+    if (it != m_colorLabels.end()) return it->second;
+    // Fall back to synchronous read (e.g. viewer opened before background thread finished)
+    QString label = XMPTools::readXmpColorLabel(sidecarOrSelf(cleanPath));
+    m_colorLabels[cleanPath] = label;
+    return label;
+}
+
+void AppBackend::setPhotoColorLabel(const QString& rawPath, const QString& label) {
+    // Accepted values: "" | "Red" | "Yellow" | "Green" | "Blue" | "Purple"
+    QString cleanPath = normalizeFilePath(rawPath);
+    { std::lock_guard<std::mutex> lk(m_metaMutex); m_colorLabels[cleanPath] = label; }
+
+    QString exiftoolPath = QCoreApplication::applicationDirPath() + "/exiftool";
+#ifdef Q_OS_WIN
+    exiftoolPath += ".exe";
+#endif
+    if (QFileInfo::exists(exiftoolPath)) {
+        QFileInfo fi(cleanPath);
+        static const QStringList rawExts = {"cr2","cr3","nef","arw","dng","raf","orf","rw2","pef","srw"};
+        // RAW files get a standard sidecar (photo.xmp alongside photo.cr2).
+        // Non-RAW files are written in-place.
+        QString targetPath = rawExts.contains(fi.suffix().toLower())
+                             ? sidecarPath(cleanPath)
+                             : cleanPath;
+
+        QStringList args;
+        args << ("-xmp:Label=" + label)
+             << "-overwrite_original"
+             << QDir::toNativeSeparators(targetPath);
+        QProcess::startDetached(exiftoolPath, args);
+    }
+
+    emit colorLabelChanged(cleanPath, label);
+}
+
 int AppBackend::getPhotoRating(const QString& rawPath) {
     QString cleanPath = QUrl::fromPercentEncoding(rawPath.toUtf8());
 #ifdef Q_OS_WIN
@@ -598,8 +669,10 @@ int AppBackend::getPhotoRating(const QString& rawPath) {
 #endif
 
     // 1. Return instantly if we already loaded or set this rating in this session
-    if (m_ratings.find(cleanPath) != m_ratings.end()) {
-        return m_ratings[cleanPath];
+    {
+        std::lock_guard<std::mutex> lk(m_metaMutex);
+        auto it = m_ratings.find(cleanPath);
+        if (it != m_ratings.end()) return it->second;
     }
 
     // 2. Fast native XMP read on the UI thread (Do NOT spawn QProcess/exiftool here)
@@ -607,13 +680,12 @@ int AppBackend::getPhotoRating(const QString& rawPath) {
     QString fileToRead = cleanPath;
     QFileInfo fi(cleanPath);
     QString ext = fi.suffix().toLower();
-    QStringList rawFormats = {"cr2", "cr3", "nef", "arw", "dng", "raf", "orf", "rw2"};
-    
+    static const QStringList rawFormats = {"cr2","cr3","nef","arw","dng","raf","orf","rw2","pef","srw"};
+
     if (rawFormats.contains(ext)) {
-        QString sidecarPath = cleanPath + ".xmp";
-        if (QFileInfo::exists(sidecarPath)) {
-            fileToRead = sidecarPath;
-        }
+        // Standard sidecar: same directory, same base name, .xmp extension
+        QString sc = sidecarPath(cleanPath);
+        if (QFileInfo::exists(sc)) fileToRead = sc;
     }
 
     #ifdef Q_OS_WIN
@@ -649,7 +721,7 @@ int AppBackend::getPhotoRating(const QString& rawPath) {
     }
 
     // 3. Cache it in memory for the rest of the session
-    m_ratings[cleanPath] = rating;
+    { std::lock_guard<std::mutex> lk(m_metaMutex); m_ratings[cleanPath] = rating; }
 
     return rating;
 }
@@ -664,34 +736,30 @@ void AppBackend::setPhotoRating(const QString& rawPath, int rating, float baseSc
     if (cleanPath.startsWith("file://")) cleanPath = cleanPath.mid(7);
 #endif
 
-    m_ratings[cleanPath] = rating;
+    { std::lock_guard<std::mutex> lk(m_metaMutex); m_ratings[cleanPath] = rating; }
     saveRatings();
 
-    if (m_writeExif) {
+    {
         QString exiftoolPath = QCoreApplication::applicationDirPath() + "/exiftool";
 #ifdef Q_OS_WIN
         exiftoolPath += ".exe";
 #endif
-
         if (!QFileInfo::exists(exiftoolPath)) {
             qWarning() << "WARNING: exiftool NOT FOUND at" << exiftoolPath << ". Skipping XMP write, but continuing AI train.";
         } else {
-            QString targetPath = cleanPath;
             QFileInfo fi(cleanPath);
-            QString ext = fi.suffix().toLower();
-            QStringList rawFormats = {"cr2", "cr3", "nef", "arw", "dng", "raf", "orf", "rw2", "pef", "srw"};
-            
-            if (rawFormats.contains(ext)) {
-                targetPath = cleanPath + ".xmp";
-            }
+            static const QStringList rawFormats = {"cr2","cr3","nef","arw","dng","raf","orf","rw2","pef","srw"};
+            // RAW: write to standard sidecar (photo.xmp). Non-RAW: write in-place.
+            QString targetPath = rawFormats.contains(fi.suffix().toLower())
+                                 ? sidecarPath(cleanPath)
+                                 : cleanPath;
 
             QStringList args;
             args << "-xmp:Rating=" + QString::number(rating)
                  << "-overwrite_original"
                  << QDir::toNativeSeparators(targetPath);
-
             QProcess::startDetached(exiftoolPath, args);
-            qDebug() << "DEBUG WRITE: ExifTool spawned for" << targetPath;
+            qDebug() << "XMP write: rating" << rating << "->" << targetPath;
         }
     }
 
@@ -1028,6 +1096,9 @@ void AppBackend::selectFolder(const QString &folderPath) {
     }
 #endif
 
+    // Join any previous metadata-read thread before touching m_files
+    if (m_metaThread.joinable()) m_metaThread.join();
+
     m_currentFolder = cleanPath;
     setStatusText("Selected " + m_currentFolder);
 
@@ -1035,14 +1106,88 @@ void AppBackend::selectFolder(const QString &folderPath) {
     m_files = Scanner::scanFiles(m_currentFolder);
     m_hashes.assign(m_files.size(), 0);
     m_clipVectors.assign(m_files.size(), {});
+    // Clear in-session caches so stale values from a previous folder don't bleed in
+    m_ratings.clear();
+    m_colorLabels.clear();
     setTotalFiles(static_cast<int>(m_files.size()));
     setProgress(0);
 
-    // 2. EMIT TO QML INSTANTLY
+    // 2. EMIT TO QML INSTANTLY (with empty placeholders for metadata)
     for (size_t i = 0; i < m_files.size(); ++i) {
         QFileInfo fi(m_files[i]);
         emit fileFound(fi.fileName(), m_files[i], static_cast<int>(i));
     }
+
+    // 3. READ XMP METADATA IN THE BACKGROUND — emits fileMetadataLoaded per file
+    //    Qt queued connection delivers signals safely to the main thread.
+    std::vector<QString> filesCopy(m_files.begin(), m_files.end());
+    m_metaThread = std::thread([this, filesCopy = std::move(filesCopy)]() {
+        static const QStringList rawExts = {"cr2","cr3","nef","arw","dng","raf","orf","rw2","pef","srw"};
+        for (int i = 0; i < static_cast<int>(filesCopy.size()); ++i) {
+            const QString& path = filesCopy[i];
+            // Determine which file to scan (sidecar for RAW, self otherwise)
+            QFileInfo fi(path);
+            QString fileToRead = path;
+            if (rawExts.contains(fi.suffix().toLower())) {
+                QString sc = fi.absolutePath() + "/" + fi.completeBaseName() + ".xmp";
+                if (QFileInfo::exists(sc)) fileToRead = sc;
+            }
+
+            // --- Read rating ---
+            int rating = 0;
+#ifdef Q_OS_WIN
+            std::ifstream rf(fileToRead.toStdWString(), std::ios::binary);
+#else
+            std::ifstream rf(fileToRead.toUtf8().constData(), std::ios::binary);
+#endif
+            std::string buf;
+            if (rf.is_open()) {
+                buf.resize(1024 * 1024);
+                rf.read(&buf[0], buf.size());
+                buf.resize(rf.gcount());
+
+                static const std::vector<std::pair<std::string,int>> rpatterns = {
+                    {"xmp:Rating>", 11}, {"xmp:Rating=\"", 12}, {"<Rating>", 8}, {" Rating=\"", 9}
+                };
+                for (const auto& [pat, off] : rpatterns) {
+                    size_t pos = buf.find(pat);
+                    if (pos != std::string::npos && pos + off < buf.size()) {
+                        char v = buf[pos + off];
+                        if (isdigit(v)) { rating = v - '0'; break; }
+                    }
+                }
+            }
+
+            // --- Read color label (reuse buf already loaded) ---
+            QString colorLabel;
+            if (!buf.empty()) {
+                static const std::vector<std::pair<std::string,std::string>> lpatterns = {
+                    {"xmp:Label=\"", "\""}, {"<xmp:Label>", "</xmp:Label>"}, {"xmp:Label='", "'"}
+                };
+                for (const auto& [open, close] : lpatterns) {
+                    size_t pos = buf.find(open);
+                    if (pos == std::string::npos) continue;
+                    size_t start = pos + open.size();
+                    size_t end   = buf.find(close, start);
+                    if (end == std::string::npos || end - start > 32) continue;
+                    std::string val = buf.substr(start, end - start);
+                    while (!val.empty() && (val.front()==' '||val.front()=='\n'||val.front()=='\r')) val.erase(val.begin());
+                    while (!val.empty() && (val.back() ==' '||val.back() =='\n'||val.back() =='\r')) val.pop_back();
+                    if (!val.empty()) { colorLabel = QString::fromStdString(val); break; }
+                }
+            }
+
+            // Cache in-memory so getPhotoRating/getPhotoColorLabel return instantly
+            {
+                std::lock_guard<std::mutex> lk(m_metaMutex);
+                m_ratings[path]     = rating;
+                m_colorLabels[path] = colorLabel;
+            }
+
+            if (rating > 0 || !colorLabel.isEmpty())
+                emit fileMetadataLoaded(i, rating, colorLabel);
+        }
+    });
 }
 
 void AppBackend::startScan() {

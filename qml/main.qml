@@ -112,6 +112,74 @@ Window {
         onActivated: trashMultiConfirmDialog.openForSelection()
     }
 
+    // ── Rating & colour-label shortcuts ─────────────────────────────────────
+    // Apply to the image currently open in the viewer, OR to every selected
+    // image in the grid when the viewer is closed.
+
+    function applyRating(rating) {
+        if (viewerWindow.visible && viewerWindow.currentFilePath !== "") {
+            // Viewer is open → act on the single displayed image
+            const next = (viewerWindow.currentRating === rating) ? 0 : rating
+            viewerWindow.currentRating = next
+            backend.setPhotoRating(viewerWindow.currentFilePath, next)
+        } else {
+            // Grid mode → act on all selected images
+            const paths = Object.keys(mainWindow.selectedPaths)
+            for (let i = 0; i < paths.length; i++)
+                backend.setPhotoRating(paths[i], rating)
+        }
+    }
+
+    function applyColorLabel(label) {
+        if (viewerWindow.visible && viewerWindow.currentFilePath !== "") {
+            const next = (viewerWindow.currentColorLabel === label) ? "" : label
+            viewerWindow.currentColorLabel = next
+            backend.setPhotoColorLabel(viewerWindow.currentFilePath, next)
+        } else {
+            const paths = Object.keys(mainWindow.selectedPaths)
+            for (let i = 0; i < paths.length; i++)
+                backend.setPhotoColorLabel(paths[i], label)
+        }
+    }
+
+    // 0 — clear star rating only
+    function applyClearRating() {
+        if (viewerWindow.visible && viewerWindow.currentFilePath !== "") {
+            viewerWindow.currentRating = 0
+            backend.setPhotoRating(viewerWindow.currentFilePath, 0)
+        } else {
+            const paths = Object.keys(mainWindow.selectedPaths)
+            for (let i = 0; i < paths.length; i++)
+                backend.setPhotoRating(paths[i], 0)
+        }
+    }
+
+    // o — remove colour label only
+    function applyClearLabel() {
+        if (viewerWindow.visible && viewerWindow.currentFilePath !== "") {
+            viewerWindow.currentColorLabel = ""
+            backend.setPhotoColorLabel(viewerWindow.currentFilePath, "")
+        } else {
+            const paths = Object.keys(mainWindow.selectedPaths)
+            for (let i = 0; i < paths.length; i++)
+                backend.setPhotoColorLabel(paths[i], "")
+        }
+    }
+
+    Shortcut { sequence: "1"; context: Qt.ApplicationShortcut; enabled: viewerWindow.visible || mainWindow.selectedCount > 0; onActivated: mainWindow.applyRating(1) }
+    Shortcut { sequence: "2"; context: Qt.ApplicationShortcut; enabled: viewerWindow.visible || mainWindow.selectedCount > 0; onActivated: mainWindow.applyRating(2) }
+    Shortcut { sequence: "3"; context: Qt.ApplicationShortcut; enabled: viewerWindow.visible || mainWindow.selectedCount > 0; onActivated: mainWindow.applyRating(3) }
+    Shortcut { sequence: "4"; context: Qt.ApplicationShortcut; enabled: viewerWindow.visible || mainWindow.selectedCount > 0; onActivated: mainWindow.applyRating(4) }
+    Shortcut { sequence: "5"; context: Qt.ApplicationShortcut; enabled: viewerWindow.visible || mainWindow.selectedCount > 0; onActivated: mainWindow.applyRating(5) }
+    Shortcut { sequence: "0"; context: Qt.ApplicationShortcut; enabled: viewerWindow.visible || mainWindow.selectedCount > 0; onActivated: mainWindow.applyClearRating() }
+    Shortcut { sequence: "o"; context: Qt.ApplicationShortcut; enabled: viewerWindow.visible || mainWindow.selectedCount > 0; onActivated: mainWindow.applyClearLabel() }
+    Shortcut { sequence: "6"; context: Qt.ApplicationShortcut; enabled: viewerWindow.visible || mainWindow.selectedCount > 0; onActivated: mainWindow.applyColorLabel("Red") }
+    Shortcut { sequence: "7"; context: Qt.ApplicationShortcut; enabled: viewerWindow.visible || mainWindow.selectedCount > 0; onActivated: mainWindow.applyColorLabel("Yellow") }
+    Shortcut { sequence: "8"; context: Qt.ApplicationShortcut; enabled: viewerWindow.visible || mainWindow.selectedCount > 0; onActivated: mainWindow.applyColorLabel("Green") }
+    Shortcut { sequence: "9"; context: Qt.ApplicationShortcut; enabled: viewerWindow.visible || mainWindow.selectedCount > 0; onActivated: mainWindow.applyColorLabel("Blue") }
+    Shortcut { sequence: "p"; context: Qt.ApplicationShortcut; enabled: viewerWindow.visible || mainWindow.selectedCount > 0; onActivated: mainWindow.applyColorLabel("Purple") }
+    // ────────────────────────────────────────────────────────────────────────
+
     component StyledButton : Button {
         id: control
         property bool isPrimary: false
@@ -253,8 +321,17 @@ Window {
                 status: "WAITING",
                 isLead: true,  
                 groupCount: 1,
-                isExpanded: false
+                isExpanded: false,
+                colorLabel: "",
+                rating: 0
             })
+        }
+
+        function onFileMetadataLoaded(index, rating, colorLabel) {
+            if (index >= 0 && index < resultsModel.count) {
+                if (rating > 0)        resultsModel.setProperty(index, "rating", rating)
+                if (colorLabel !== "") resultsModel.setProperty(index, "colorLabel", colorLabel)
+            }
         }
 
         function onFileProcessed(index, isRejected, rejectReason, aestheticScore, width, height) {
@@ -270,6 +347,15 @@ Window {
             if (index >= 0 && index < resultsModel.count) {
                 resultsModel.setProperty(index, "isLead", isLead)
                 resultsModel.setProperty(index, "groupCount", groupSize)
+            }
+        }
+
+        function onColorLabelChanged(filePath, label) {
+            for (let i = 0; i < resultsModel.count; i++) {
+                if (resultsModel.get(i).filePath === filePath) {
+                    resultsModel.setProperty(i, "colorLabel", label)
+                    break
+                }
             }
         }
     }
@@ -438,6 +524,17 @@ Window {
         
         property int currentRating: 0
         property string currentFilePath: ""
+        property string currentColorLabel: ""
+
+        // Maps label string -> hex color used for UI accents
+        function labelColor(lbl) {
+            if (lbl === "Red")    return "#e05050"
+            if (lbl === "Yellow") return "#d4b800"
+            if (lbl === "Green")  return "#3caa3c"
+            if (lbl === "Blue")   return "#3a80d2"
+            if (lbl === "Purple") return "#9b59b6"
+            return ""
+        }
 
         onCurrentIndexChanged: {
             if (currentIndex >= 0 && currentIndex < backend.burstProxy.count) {
@@ -456,8 +553,9 @@ Window {
                 let meta = backend.getPhotoMetadata(encodeURIComponent(file));
                 exifInfo = meta.infoText;
                 
-                viewerWindow.currentRating = backend.getPhotoRating(file);
-                
+                viewerWindow.currentRating     = backend.getPhotoRating(file);
+                viewerWindow.currentColorLabel = backend.getPhotoColorLabel(file);
+
                 console.log("[QML] Photo changed. New Path:", viewerWindow.currentFilePath, "Rating:", viewerWindow.currentRating);
             }
         }
@@ -553,10 +651,14 @@ Window {
                             Repeater {
                                 model: 5
                                 delegate: Text {
-                                    property int starVal: index + 1 
-                                    
+                                    property int starVal: index + 1
+                                    property string lblColor: viewerWindow.labelColor(viewerWindow.currentColorLabel)
+
                                     text: starVal <= viewerWindow.currentRating ? "★" : "☆"
-                                    color: starVal <= viewerWindow.currentRating ? "#FFD700" : "#aaaaaa"
+                                    // Filled stars: gold. Empty stars: label color if set, else grey.
+                                    color: starVal <= viewerWindow.currentRating
+                                           ? "#FFD700"
+                                           : (lblColor !== "" ? lblColor : "#aaaaaa")
                                     font.pixelSize: 32
                                     
                                     MouseArea {
@@ -588,22 +690,7 @@ Window {
                     }
                 }
 
-                function setRatingFromKey(rating) {
-                    console.log("[QML] Key pressed:", rating);
-                    if (viewerWindow.currentRating === rating) {
-                        viewerWindow.currentRating = 0;
-                    } else {
-                        viewerWindow.currentRating = rating;
-                    }
-                        backend.setPhotoRating(viewerWindow.currentFilePath, viewerWindow.currentRating);
-                }   
 
-                Shortcut { sequence: "1"; onActivated: viewerWindow.setRatingFromKey(1) }
-                Shortcut { sequence: "2"; onActivated: viewerWindow.setRatingFromKey(2) }
-                Shortcut { sequence: "3"; onActivated: viewerWindow.setRatingFromKey(3) }
-                Shortcut { sequence: "4"; onActivated: viewerWindow.setRatingFromKey(4) }
-                Shortcut { sequence: "5"; onActivated: viewerWindow.setRatingFromKey(5) }
-                Shortcut { sequence: "0"; onActivated: viewerWindow.setRatingFromKey(0) }
             }
             
             Rectangle {
@@ -1160,6 +1247,66 @@ Window {
                 }
             }
 
+            // --- COLOR LABEL FILTER ROW ---
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 6
+
+                Text {
+                    text: "Label:"
+                    color: isLight ? "#666" : "#aaa"
+                    font.pixelSize: 13
+                    Layout.alignment: Qt.AlignVCenter
+                }
+
+                // "All" button
+                Rectangle {
+                    width: 36; height: 24; radius: 4
+                    color: backend.burstProxy.colorLabelFilter === "" ? (isLight ? "#0066cc" : "#3a80d2") : (isLight ? "#e0e0e0" : "#2a2a2a")
+                    border.color: isLight ? "#ccc" : "#444"
+                    Layout.alignment: Qt.AlignVCenter
+                    Text {
+                        anchors.centerIn: parent
+                        text: "All"
+                        color: backend.burstProxy.colorLabelFilter === "" ? "white" : (isLight ? "#333" : "#aaa")
+                        font.pixelSize: 12
+                    }
+                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: backend.burstProxy.colorLabelFilter = "" }
+                }
+
+                // Colored dot buttons
+                Repeater {
+                    model: [
+                        { label: "Red",    color: "#e05050" },
+                        { label: "Yellow", color: "#d4b800" },
+                        { label: "Green",  color: "#3caa3c" },
+                        { label: "Blue",   color: "#3a80d2" },
+                        { label: "Purple", color: "#9b59b6" }
+                    ]
+                    delegate: Rectangle {
+                        property bool active: backend.burstProxy.colorLabelFilter === modelData.label
+                        width: 24; height: 24; radius: 12
+                        color: modelData.color
+                        border.color: active ? "white" : "transparent"
+                        border.width: active ? 2 : 0
+                        opacity: active ? 1.0 : 0.55
+                        Layout.alignment: Qt.AlignVCenter
+                        ToolTip.visible: hoverArea.containsMouse
+                        ToolTip.text: modelData.label
+                        MouseArea {
+                            id: hoverArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: backend.burstProxy.colorLabelFilter =
+                                parent.active ? "" : modelData.label
+                        }
+                    }
+                }
+
+                Item { Layout.fillWidth: true }
+            }
+
             // Selection action bar — visible when items are selected
             Rectangle {
                 Layout.fillWidth: true
@@ -1365,6 +1512,26 @@ Window {
                                     font.bold: true
                                     font.pixelSize: 12
                                 }
+                            }
+
+                            // COLOR LABEL BOOKMARK — left edge of card
+                            Rectangle {
+                                visible: model.colorLabel !== ""
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.topMargin: 24
+                                width: 6
+                                height: 36
+                                radius: 3
+                                color: {
+                                    if (model.colorLabel === "Red")    return "#e05050"
+                                    if (model.colorLabel === "Yellow") return "#d4b800"
+                                    if (model.colorLabel === "Green")  return "#3caa3c"
+                                    if (model.colorLabel === "Blue")   return "#3a80d2"
+                                    if (model.colorLabel === "Purple") return "#9b59b6"
+                                    return "transparent"
+                                }
+                                z: 11
                             }
 
                             // BADGE

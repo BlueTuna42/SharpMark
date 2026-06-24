@@ -9,6 +9,7 @@
 #include <QSortFilterProxyModel>
 
 #include <atomic>
+#include <mutex>
 #include <thread>
 #include <vector>
 #include <map>
@@ -318,6 +319,7 @@ class BurstFilterProxyModel : public QSortFilterProxyModel {
     Q_PROPERTY(bool groupBursts READ groupBursts WRITE setGroupBursts NOTIFY groupBurstsChanged)
     Q_PROPERTY(int count READ count NOTIFY countChanged)
     Q_PROPERTY(SortMode sortMode READ sortMode WRITE setSortMode NOTIFY sortModeChanged)
+    Q_PROPERTY(QString colorLabelFilter READ colorLabelFilter WRITE setColorLabelFilter NOTIFY colorLabelFilterChanged)
 
 public:
     enum SortMode {
@@ -380,26 +382,44 @@ public:
     void setSortMode(SortMode mode) {
         if (m_sortMode != mode) {
             m_sortMode = mode;
-            
             sort(0, m_sortMode == SortBestFirst ? Qt::DescendingOrder : Qt::AscendingOrder);
-            
             emit sortModeChanged();
+        }
+    }
+
+    QString colorLabelFilter() const { return m_colorLabelFilter; }
+    void setColorLabelFilter(const QString& filter) {
+        if (m_colorLabelFilter != filter) {
+            m_colorLabelFilter = filter;
+            invalidateFilter();
+            emit colorLabelFilterChanged();
+            emit countChanged();
         }
     }
 
 protected:
     bool filterAcceptsRow(int source_row, const QModelIndex& source_parent) const override {
+        QModelIndex idx = sourceModel()->index(source_row, 0, source_parent);
+
+        // ── Color label filter ───────────────────────────────────────────────
+        if (!m_colorLabelFilter.isEmpty()) {
+            if (m_colorLabelRole == -1) m_colorLabelRole = roleNames().key("colorLabel", -1);
+            QString rowLabel = (m_colorLabelRole != -1)
+                               ? sourceModel()->data(idx, m_colorLabelRole).toString()
+                               : QString();
+            if (rowLabel != m_colorLabelFilter) return false;
+        }
+
+        // ── Burst group filter ───────────────────────────────────────────────
         if (!m_groupBursts) return true;
 
-        QModelIndex idx = sourceModel()->index(source_row, 0, source_parent);
-        
-        if (m_isLeadRole == -1) m_isLeadRole = roleNames().key("isLead", -1);
+        if (m_isLeadRole == -1)     m_isLeadRole     = roleNames().key("isLead",     -1);
         if (m_isExpandedRole == -1) m_isExpandedRole = roleNames().key("isExpanded", -1);
 
-        bool isLead = (m_isLeadRole != -1) ? sourceModel()->data(idx, m_isLeadRole).toBool() : true;
+        bool isLead     = (m_isLeadRole     != -1) ? sourceModel()->data(idx, m_isLeadRole).toBool()     : true;
         bool isExpanded = (m_isExpandedRole != -1) ? sourceModel()->data(idx, m_isExpandedRole).toBool() : true;
 
-        return isLead || isExpanded; // Keep it if it's a leader, OR if the group was expanded
+        return isLead || isExpanded;
     }
 
     bool lessThan(const QModelIndex &source_left, const QModelIndex &source_right) const override {
@@ -429,6 +449,7 @@ signals:
     void groupBurstsChanged();
     void countChanged();
     void sortModeChanged();
+    void colorLabelFilterChanged();
 
 private:
     QObject* m_source = nullptr;
@@ -437,6 +458,8 @@ private:
     mutable int m_isExpandedRole = -1;
     SortMode m_sortMode = SortDefault;
     mutable int m_scoreRole = -1;
+    QString m_colorLabelFilter;               // "" = show all
+    mutable int m_colorLabelRole = -1;
 };
 
 class AppBackend : public QObject {
@@ -474,6 +497,10 @@ public:
     Q_INVOKABLE QVariantMap getPhotoMetadata(const QString& filePath);
     Q_INVOKABLE int getPhotoRating(const QString& filePath);
     Q_INVOKABLE void setPhotoRating(const QString& filePath, int rating, float baseScore = 0.0f);
+
+    // Color labels — "" | "Red" | "Yellow" | "Green" | "Blue" | "Purple"
+    Q_INVOKABLE QString getPhotoColorLabel(const QString& filePath);
+    Q_INVOKABLE void    setPhotoColorLabel(const QString& filePath, const QString& label);
 
     Q_INVOKABLE QString logFilePath() const;
 
@@ -553,6 +580,10 @@ signals:
 
     void histogramUpdated();
     void groupAssigned(int index, int leadIndex, bool isLead, int groupSize);
+    // Emitted after setPhotoColorLabel so QML can update grid badges live
+    void colorLabelChanged(const QString& filePath, const QString& label);
+    // Emitted from background thread after XMP is read for a file on folder open
+    void fileMetadataLoaded(int index, int rating, const QString& colorLabel);
 
 private:
     QString m_statusText;
@@ -565,6 +596,7 @@ private:
     std::atomic<bool> m_isScanning{false};
     std::atomic<bool> m_cancelRequested{false};
     std::thread m_scanThread;
+    std::thread m_metaThread;   // background XMP read on folder open
     
     std::vector<QString> m_files;
 
@@ -614,7 +646,9 @@ private:
 
     PipelineRunner createPipeline();
 
-    std::map<QString, int> m_ratings;
+    mutable std::mutex         m_metaMutex;    // guards m_ratings and m_colorLabels
+    std::map<QString, int>     m_ratings;
+    std::map<QString, QString> m_colorLabels;  // filePath -> "Red"|"Yellow"|"Green"|"Blue"|"Purple"|""
     void loadRatings();
     void saveRatings();
 };

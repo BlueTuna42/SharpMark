@@ -2,6 +2,7 @@
 #include <iostream>
 #include <cstdlib>
 #include <vector>
+#include <fstream>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -71,4 +72,57 @@ int XMPTools::writeXmpRating(const QString& exiftoolPath, const QString& sourceF
                   QString::number(rating) + " \"" + targetFile + "\"";
     return std::system(cmd.toUtf8().constData());
 #endif
+}
+
+int XMPTools::writeXmpColorLabel(const QString& exiftoolPath, const QString& targetFile, const QString& label) {
+    // label is one of: "Red","Yellow","Green","Blue","Purple","" (empty = clear)
+    QString escaped = label;
+    escaped.replace("\"", "\\\"");
+#ifdef _WIN32
+    QString cmd = "\"" + exiftoolPath + "\" -overwrite_original \"-xmp:Label=" +
+                  escaped + "\" \"" + targetFile + "\"";
+    return executeCommandSilentW(cmd);
+#else
+    QString cmd = "\"" + exiftoolPath + "\" -overwrite_original \"-xmp:Label=" +
+                  escaped + "\" \"" + targetFile + "\"";
+    return std::system(cmd.toUtf8().constData());
+#endif
+}
+
+QString XMPTools::readXmpColorLabel(const QString& filePath) {
+    // Fast native scan — no process spawn.
+    // Looks for xmp:Label="Red" or <xmp:Label>Red</xmp:Label> within the first 1 MB.
+#ifdef _WIN32
+    std::ifstream file(filePath.toStdWString(), std::ios::binary);
+#else
+    std::ifstream file(filePath.toUtf8().constData(), std::ios::binary);
+#endif
+    if (!file.is_open()) return QString();
+
+    const size_t bufSize = 1024 * 1024;
+    std::string buf;
+    buf.resize(bufSize);
+    file.read(&buf[0], bufSize);
+    buf.resize(file.gcount());
+
+    // Patterns to search for (attribute and element forms)
+    static const std::vector<std::pair<std::string, std::string>> patterns = {
+        {"xmp:Label=\"", "\""},
+        {"<xmp:Label>",  "</xmp:Label>"},
+        {"xmp:Label='" , "'"},
+    };
+
+    for (const auto& [open, close] : patterns) {
+        size_t pos = buf.find(open);
+        if (pos == std::string::npos) continue;
+        size_t start = pos + open.size();
+        size_t end   = buf.find(close, start);
+        if (end == std::string::npos || end - start > 32) continue;
+        std::string val = buf.substr(start, end - start);
+        // Trim whitespace
+        while (!val.empty() && (val.front() == ' ' || val.front() == '\n' || val.front() == '\r')) val.erase(val.begin());
+        while (!val.empty() && (val.back()  == ' ' || val.back()  == '\n' || val.back()  == '\r')) val.pop_back();
+        if (!val.empty()) return QString::fromStdString(val);
+    }
+    return QString();
 }
