@@ -112,6 +112,20 @@ Window {
         onActivated: trashMultiConfirmDialog.openForSelection()
     }
 
+    // ── Open in external editor (E) ─────────────────────────────────────────
+    Shortcut {
+        sequence: "e"
+        context: Qt.ApplicationShortcut
+        enabled: (viewerWindow.visible || mainWindow.selectedCount > 0) && backend.externalEditorPath !== ""
+        onActivated: {
+            if (viewerWindow.visible && viewerWindow.currentFilePath !== "") {
+                backend.openInExternalEditor([viewerWindow.currentFilePath])
+            } else {
+                backend.openInExternalEditor(Object.keys(mainWindow.selectedPaths))
+            }
+        }
+    }
+
     // ── Rating & colour-label shortcuts ─────────────────────────────────────
     // Apply to the image currently open in the viewer, OR to every selected
     // image in the grid when the viewer is closed.
@@ -401,8 +415,40 @@ Window {
                     Layout.fillWidth: true
                 }
 
-                Text { text: "Write EXIF rating:"; color: textColor }
-                CheckBox { checked: backend.writeExif; onCheckedChanged: backend.writeExif = checked }
+                Text { text: "External editor:"; color: textColor }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+                    TextField {
+                        id: editorPathField
+                        Layout.fillWidth: true
+                        placeholderText: "Path to Photoshop, Lightroom, etc."
+                        text: backend.externalEditorPath
+                        color: textColor
+                        background: Rectangle {
+                            color: isLight ? "#f5f5f5" : "#1e1e1e"
+                            border.color: popupBorder
+                            radius: 4
+                        }
+                        onEditingFinished: backend.externalEditorPath = text
+                    }
+                    StyledButton {
+                        text: "Browse..."
+                        onClicked: editorFileDialog.open()
+                    }
+                    FileDialog {
+                        id: editorFileDialog
+                        title: "Select external editor executable"
+                        nameFilters: ["Executables (*.exe *.app)", "All files (*)"]
+                        onAccepted: {
+                            let path = selectedFile.toString()
+                            // Strip file:/// prefix
+                            path = path.replace(/^file:\/\/\//, "").replace(/^file:\/\//, "")
+                            editorPathField.text = path
+                            backend.externalEditorPath = path
+                        }
+                    }
+                }
 
                 Text { text: "RAW View Quality:"; color: textColor }
                 ComboBox {

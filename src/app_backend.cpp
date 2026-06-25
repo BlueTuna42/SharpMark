@@ -904,6 +904,7 @@ void AppBackend::loadSettings() {
 
             if (key == "themeMode") m_themeMode = value.toInt();
             else if (key == "writeExif") m_writeExif = (value == "1");
+            else if (key == "externalEditorPath") m_externalEditorPath = value.trimmed();
             else if (key == "rawViewMode") m_rawViewMode = value.toInt();
             else if (key == "rawAnalysisMode") m_rawAnalysisMode = value.toInt();
             else if (key == "groupBursts") m_groupBursts = (value == "1");
@@ -1027,9 +1028,10 @@ void AppBackend::saveSettings() {
     if (!qf.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) return;
 
     QTextStream out(&qf);
-    out << "themeMode="      << m_themeMode                  << "\n";
-    out << "writeExif="      << (m_writeExif ? 1 : 0)        << "\n";
-    out << "rawViewMode="    << m_rawViewMode                 << "\n";
+    out << "themeMode="           << m_themeMode                  << "\n";
+    out << "writeExif="           << (m_writeExif ? 1 : 0)        << "\n";
+    out << "externalEditorPath="  << m_externalEditorPath          << "\n";
+    out << "rawViewMode="         << m_rawViewMode                 << "\n";
     out << "rawAnalysisMode="<< m_rawAnalysisMode             << "\n";
     out << "groupBursts="    << (m_groupBursts ? 1 : 0)      << "\n";
     out << "lutEnabled="     << (m_lutEnabled ? 1 : 0)       << "\n";
@@ -1073,6 +1075,40 @@ void AppBackend::setRawViewMode(int mode) { if (m_rawViewMode != mode) { m_rawVi
 
 int AppBackend::rawAnalysisMode() const { return m_rawAnalysisMode; }
 void AppBackend::setRawAnalysisMode(int mode) { if (m_rawAnalysisMode != mode) { m_rawAnalysisMode = mode; saveSettings(); emit rawAnalysisModeChanged(); } }
+
+void AppBackend::setExternalEditorPath(const QString& path) {
+    if (m_externalEditorPath != path) {
+        m_externalEditorPath = path;
+        saveSettings();
+        emit externalEditorPathChanged();
+    }
+}
+
+void AppBackend::openInExternalEditor(const QStringList& filePaths) {
+    if (m_externalEditorPath.isEmpty()) {
+        qWarning() << "openInExternalEditor: no external editor configured.";
+        return;
+    }
+    if (filePaths.isEmpty()) return;
+
+    // Clean each path (strip percent-encoding and file:// prefixes)
+    QStringList cleaned;
+    for (const QString& raw : filePaths) {
+        QString p = QUrl::fromPercentEncoding(raw.toUtf8());
+#ifdef Q_OS_WIN
+        if      (p.startsWith("file:///")) p = p.mid(8);
+        else if (p.startsWith("file://"))  p = p.mid(7);
+        else if (p.startsWith("/"))        p = p.mid(1);
+#else
+        if (p.startsWith("file://")) p = p.mid(7);
+#endif
+        cleaned << QDir::toNativeSeparators(p);
+    }
+
+    // Pass all file paths as arguments — Photoshop and most editors accept multiple
+    QProcess::startDetached(m_externalEditorPath, cleaned);
+    qDebug() << "openInExternalEditor:" << m_externalEditorPath << cleaned;
+}
 
 void AppBackend::selectFolder(const QString &folderPath) {
     // Cancel any in-progress scan and wait for the thread to fully exit before

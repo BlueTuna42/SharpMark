@@ -486,6 +486,9 @@ class AppBackend : public QObject {
     Q_PROPERTY(QString activeLutName READ activeLutName NOTIFY activeLutChanged)
     Q_PROPERTY(QStringList availableLuts READ availableLuts NOTIFY activeLutChanged)
 
+    // External editor
+    Q_PROPERTY(QString externalEditorPath READ externalEditorPath WRITE setExternalEditorPath NOTIFY externalEditorPathChanged)
+
 public:
     explicit AppBackend(QObject *parent = nullptr);
     ~AppBackend();
@@ -503,6 +506,11 @@ public:
     Q_INVOKABLE void    setPhotoColorLabel(const QString& filePath, const QString& label);
 
     Q_INVOKABLE QString logFilePath() const;
+
+    // External editor — open one or more files in the configured application
+    Q_INVOKABLE void openInExternalEditor(const QStringList& filePaths);
+    QString externalEditorPath() const { return m_externalEditorPath; }
+    void setExternalEditorPath(const QString& path);
 
     // LUT management
     Q_INVOKABLE void loadLutFile(const QString& filePath);
@@ -573,6 +581,7 @@ signals:
 
     void lutEnabledChanged();
     void activeLutChanged();
+    void externalEditorPathChanged();
     
     void fileFound(const QString &fileName, const QString &filePath, int index);
     void fileProcessed(int index, bool isRejected, QString rejectReason, float aestheticScore, int width, int height);
@@ -635,6 +644,9 @@ private:
 
     // Postprocessor config
     PostprocessorConfigModel m_postprocessorModel;
+
+    // External editor
+    QString m_externalEditorPath;
 
     // LUT state
     bool            m_lutEnabled    = false;
