@@ -906,9 +906,8 @@ Window {
                                 enabled: model.supportsDisable
                                 checked: model.enabled
                                 opacity: model.supportsDisable ? 1.0 : 0.4
-                                onCheckedChanged: {
+                                onToggled: {
                                     if (model.id === "visual_hash") {
-                                        // Semaphore: visual_hash and clip_embedding are mutually exclusive
                                         backend.setGroupingMode(checked ? "visual_hash" : "none")
                                     } else {
                                         backend.preprocessorModel.setStepEnabled(model.index, checked)
@@ -1000,9 +999,7 @@ Window {
 
                                     CheckBox {
                                         checked: model.enabled
-                                        onCheckedChanged: {
-                                            backend.pipelineModel.setStepEnabled(model.index, checked)
-                                        }
+                                        onToggled: backend.pipelineModel.setStepEnabled(model.index, checked)
                                     }
 
                                     Text {
@@ -1096,9 +1093,8 @@ Window {
                                 enabled: model.supportsDisable
                                 checked: model.enabled
                                 opacity: model.supportsDisable ? 1.0 : 0.4
-                                onCheckedChanged: {
+                                onToggled: {
                                     if (model.id === "clip_embedding") {
-                                        // Semaphore: clip_embedding and visual_hash are mutually exclusive
                                         backend.setGroupingMode(checked ? "clip_embedding" : "none")
                                     } else {
                                         backend.postprocessorModel.setStepEnabled(model.index, checked)
