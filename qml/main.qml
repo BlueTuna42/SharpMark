@@ -25,9 +25,9 @@ Window {
     property color cardBlurryBorder: isLight ? "#ff8888" : "#ff4444"
     property color cardBlurryText: isLight ? "#cc0000" : "#ff8888"
     
-    property color cardSharpBg: isLight ? "#eaffe8" : "#1c4a2a"
-    property color cardSharpBorder: isLight ? "#66cc66" : "#44ff44"
-    property color cardSharpText: isLight ? "#008800" : "#88ff88"
+    property color cardNeutralBg: isLight ? "#ffffff" : "#2a2a2a"
+    property color cardNeutralBorder: isLight ? "#cccccc" : "#444444"
+    property color cardNeutralText: isLight ? "#666666" : "#aaaaaa"
 
     property bool isGridView: true
     property bool pipelineVisible: false // Property for the left sidebar
@@ -80,6 +80,55 @@ Window {
         selectedPaths = {}
         selectedCount = 0
         lastClickedProxyIndex = -1
+    }
+    
+    // Calculate score color: 
+    // - Below 4: red-orange (hue 0-15)
+    // - 4-7: smooth gradient orange to green
+    // - Above 7: vibrant deep green (hue 120-130)
+    function getScoreColor(score) {
+        score = Math.max(0, Math.min(10, score))
+        
+        var hue
+        if (score <= 4) {
+            // 0-4: red (0) to orange (15) - very red/orange
+            hue = (score / 4) * 15
+        } else if (score <= 7) {
+            // 4-7: orange (15) to green (120)
+            hue = 15 + ((score - 4) / 3) * 105
+        } else {
+            // 7-10: green (120) to vibrant deep green (130)
+            hue = 120 + ((score - 7) / 3) * 10
+        }
+        
+        var saturation = 0.9
+        var value = 0.85
+        
+        // Convert HSV to RGB
+        var c = value * saturation
+        var x = c * (1 - Math.abs((hue / 60) % 2 - 1))
+        var m = value - c
+        
+        var r, g, b
+        if (hue < 60) {
+            r = c; g = x; b = 0
+        } else if (hue < 120) {
+            r = x; g = c; b = 0
+        } else if (hue < 180) {
+            r = 0; g = c; b = x
+        } else if (hue < 240) {
+            r = 0; g = x; b = c
+        } else if (hue < 300) {
+            r = x; g = 0; b = c
+        } else {
+            r = c; g = 0; b = x
+        }
+        
+        r = Math.round((r + m) * 255)
+        g = Math.round((g + m) * 255)
+        b = Math.round((b + m) * 255)
+        
+        return "#" + r.toString(16).padStart(2, '0') + g.toString(16).padStart(2, '0') + b.toString(16).padStart(2, '0')
     }
 
     function toggleGroupExpansion(proxyIndex) {
@@ -1490,10 +1539,10 @@ Window {
 
                             readonly property bool itemSelected: !!mainWindow.selectedPaths[model.filePath]
 
-                            color: model.status === "WAITING" ? cardWaitingBg : (model.isRejected ? cardBlurryBg : cardSharpBg)
+                            color: model.status === "WAITING" ? cardWaitingBg : (model.isRejected ? cardBlurryBg : cardNeutralBg)
                             radius: 6
                             border.color: itemSelected ? "#0066cc"
-                                        : (model.status === "WAITING" ? cardWaitingBorder : (model.isRejected ? cardBlurryBorder : cardSharpBorder))
+                                        : (model.status === "WAITING" ? cardWaitingBorder : (model.isRejected ? cardBlurryBorder : cardNeutralBorder))
                             border.width: itemSelected ? 3 : 1
 
                             MouseArea {
@@ -1550,7 +1599,7 @@ Window {
                                         if (model.isRejected) return "Rejected: " + model.rejectReason;
                                         return "Score: " + model.score;
                                     }
-                                    color: model.status === "WAITING" ? cardWaitingText : (model.isRejected ? cardBlurryText : cardSharpText)
+                                    color: model.status === "WAITING" ? cardWaitingText : (model.isRejected ? cardBlurryText : getScoreColor(parseFloat(model.score)))
                                     font.bold: true
                                     font.pixelSize: 12
                                 }
@@ -1661,10 +1710,10 @@ Window {
 
                             readonly property bool itemSelected: !!mainWindow.selectedPaths[model.filePath]
 
-                            color: model.status === "WAITING" ? cardWaitingBg : (model.isRejected ? cardBlurryBg : cardSharpBg)
+                            color: model.status === "WAITING" ? cardWaitingBg : (model.isRejected ? cardBlurryBg : cardNeutralBg)
                             radius: 4
                             border.color: itemSelected ? "#0066cc"
-                                        : (model.status === "WAITING" ? cardWaitingBorder : (model.isRejected ? cardBlurryBorder : cardSharpBorder))
+                                        : (model.status === "WAITING" ? cardWaitingBorder : (model.isRejected ? cardBlurryBorder : cardNeutralBorder))
                             border.width: itemSelected ? 3 : 1
 
                             MouseArea {
@@ -1721,7 +1770,7 @@ Window {
                                         if (model.isRejected) return "Rejected: " + model.rejectReason;
                                         return "Score: " + model.score;
                                     }
-                                    color: model.status === "WAITING" ? cardWaitingText : (model.isRejected ? cardBlurryText : cardSharpText)
+                                    color: model.status === "WAITING" ? cardWaitingText : (model.isRejected ? cardBlurryText : getScoreColor(parseFloat(model.score)))
                                     font.bold: true
                                     font.pixelSize: 14
                                     Layout.alignment: Qt.AlignRight
