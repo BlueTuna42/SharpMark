@@ -29,9 +29,10 @@ Window {
     property color cardNeutralBorder: isLight ? "#cccccc" : "#444444"
     property color cardNeutralText: isLight ? "#666666" : "#aaaaaa"
 
-    property bool isGridView: true
+property bool isGridView: true
     property bool pipelineVisible: false // Property for the left sidebar
     property bool groupBursts: backend.groupBursts
+    property bool showPhotoControls: true // Collapsible photo controls (rows 2 & 3)
 
     // --- Multi-select state ---
     property var selectedPaths: ({})   // object used as a set: { filePath: true }
@@ -1169,7 +1170,7 @@ Window {
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.margins: 20
-            spacing: 15
+            spacing: 10
 
             // --- TOP ROW: Directory, Scanning, and Settings ---
             RowLayout {
@@ -1193,9 +1194,37 @@ Window {
                     text: "Cancel"
                     onClicked: backend.cancelScan()
                 }
-                StyledButton {
+StyledButton {
                     text: "Settings"
                     onClicked: settingsPopup.open()
+                }
+                
+                // Toggle photo controls visibility
+                Button {
+                    width: 34
+                    height: 34
+                    hoverEnabled: true
+                    flat: true
+                    onClicked: mainWindow.showPhotoControls = !mainWindow.showPhotoControls
+                    
+                    contentItem: Text {
+                        text: mainWindow.showPhotoControls ? "▼" : "▲"
+                        font.pixelSize: 12
+                        color: textColor
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    
+                    background: Rectangle {
+                        radius: 6
+                        color: parent.hovered ? (isLight ? "#e0e0e0" : "#333333") : "transparent"
+                        border.color: isLight ? "#cccccc" : "#555555"
+                        border.width: 1
+                        Behavior on color { ColorAnimation { duration: 100 } }
+                    }
+                    
+                    ToolTip.visible: hovered
+                    ToolTip.text: mainWindow.showPhotoControls ? "Hide photo controls" : "Show photo controls"
                 }
 
                 // Status badge — fills remaining space, shrinks gracefully
@@ -1240,12 +1269,35 @@ Window {
                         Behavior on color { ColorAnimation { duration: 200 } }
                     }
                 }
-            }
-
-            // --- SECOND ROW: Photo Menu Controls (View, Sort, LUT) ---
-            RowLayout {
+}
+            
+            // --- Collapsible Photo Controls (Rows 2 & 3) ---
+            Rectangle {
+                id: photoControlsContainer
                 Layout.fillWidth: true
-                spacing: 15
+                Layout.preferredHeight: photoControlsColumn.height
+                Layout.minimumHeight: 0
+                color: "transparent"
+                clip: true
+                
+                Behavior on Layout.preferredHeight { NumberAnimation { duration: 200; easing.type: Easing.OutQuad } }
+                
+                Column {
+                    id: photoControlsColumn
+                    width: parent.width
+                    spacing: 10
+                    height: mainWindow.showPhotoControls ? photoControlsContent.implicitHeight : 0
+                    
+                    Behavior on height { NumberAnimation { duration: 200; easing.type: Easing.OutQuad } }
+                    
+                    Column {
+                    id: photoControlsContent
+                    spacing: 10
+                    
+                    // --- SECOND ROW: Photo Menu Controls (View, Sort, LUT) ---
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 15
 
                 Text {
                     text: "Layout:"
@@ -1397,6 +1449,9 @@ Window {
 
                 Item { Layout.fillWidth: true }
             }
+        } // End of photoControlsContent Column
+    } // End of photoControlsColumn Column
+} // End of photoControlsContainer Rectangle
 
             // Selection action bar — visible when items are selected
             Rectangle {
