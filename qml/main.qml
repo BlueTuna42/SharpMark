@@ -387,7 +387,8 @@ property bool isGridView: true
                 groupCount: 1,
                 isExpanded: false,
                 colorLabel: "",
-                rating: 0
+                rating: 0,
+                isBestShot: false
             })
         }
 
@@ -411,6 +412,12 @@ property bool isGridView: true
             if (index >= 0 && index < resultsModel.count) {
                 resultsModel.setProperty(index, "isLead", isLead)
                 resultsModel.setProperty(index, "groupCount", groupSize)
+            }
+        }
+
+        function onBestShotAssigned(index, isBestShot, leadIndex) {
+            if (index >= 0 && index < resultsModel.count) {
+                resultsModel.setProperty(index, "isBestShot", isBestShot)
             }
         }
 
@@ -1596,9 +1603,9 @@ StyledButton {
 
                             color: model.status === "WAITING" ? cardWaitingBg : (model.isRejected ? cardBlurryBg : cardNeutralBg)
                             radius: 6
-                            border.color: itemSelected ? "#0066cc"
-                                        : (model.status === "WAITING" ? cardWaitingBorder : (model.isRejected ? cardBlurryBorder : cardNeutralBorder))
-                            border.width: itemSelected ? 3 : 1
+                            border.color: (model.isBestShot && mainWindow.groupBursts && model.isExpanded) ? "#FFD700" : (itemSelected ? "#0066cc"
+                                        : (model.status === "WAITING" ? cardWaitingBorder : (model.isRejected ? cardBlurryBorder : cardNeutralBorder)))
+                            border.width: (model.isBestShot && mainWindow.groupBursts && model.isExpanded) ? 3 : (itemSelected ? 3 : 1)
 
                             MouseArea {
                                 anchors.fill: parent
@@ -1767,9 +1774,9 @@ StyledButton {
 
                             color: model.status === "WAITING" ? cardWaitingBg : (model.isRejected ? cardBlurryBg : cardNeutralBg)
                             radius: 4
-                            border.color: itemSelected ? "#0066cc"
-                                        : (model.status === "WAITING" ? cardWaitingBorder : (model.isRejected ? cardBlurryBorder : cardNeutralBorder))
-                            border.width: itemSelected ? 3 : 1
+                            border.color: (model.isBestShot && mainWindow.groupBursts && model.isExpanded) ? "#FFD700" : (itemSelected ? "#0066cc"
+                                        : (model.status === "WAITING" ? cardWaitingBorder : (model.isRejected ? cardBlurryBorder : cardNeutralBorder)))
+                            border.width: (model.isBestShot && mainWindow.groupBursts && model.isExpanded) ? 3 : (itemSelected ? 3 : 1)
 
                             MouseArea {
                                 anchors.fill: parent
@@ -1832,7 +1839,6 @@ StyledButton {
                                     Layout.rightMargin: 10
                                 }
                             }
-
                         }
                     }
                 }

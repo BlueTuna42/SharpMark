@@ -589,6 +589,7 @@ signals:
 
     void histogramUpdated();
     void groupAssigned(int index, int leadIndex, bool isLead, int groupSize);
+    void bestShotAssigned(int index, bool isBestShot, int leadIndex);
     // Emitted after setPhotoColorLabel so QML can update grid badges live
     void colorLabelChanged(const QString& filePath, const QString& label);
     // Emitted from background thread after XMP is read for a file on folder open
@@ -636,6 +637,8 @@ private:
     QString m_histogramBase64;
     std::vector<uint64_t> m_hashes;
     std::vector<std::vector<float>> m_clipVectors; // 512-float CLIP embeddings, parallel to m_files
+    std::vector<float> m_aestheticScores; // AI aesthetic scores, parallel to m_files
+    std::vector<bool> m_isRejected; // Rejected status, parallel to m_files
 
     PipelineConfigModel m_pipelineModel;
 

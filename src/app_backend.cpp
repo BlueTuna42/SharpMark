@@ -1142,6 +1142,7 @@ void AppBackend::selectFolder(const QString &folderPath) {
     m_files = Scanner::scanFiles(m_currentFolder);
     m_hashes.assign(m_files.size(), 0);
     m_clipVectors.assign(m_files.size(), {});
+    m_aestheticScores.assign(m_files.size(), 0.0f);
     // Clear in-session caches so stale values from a previous folder don't bleed in
     m_ratings.clear();
     m_colorLabels.clear();
@@ -1348,6 +1349,9 @@ void AppBackend::runScannerTask() {
                         result.rejected = true;
                         result.rejectReason = "Blurry";
                     }
+                    
+                    // Store aesthetic score for best-shot detection
+                    m_aestheticScores[idx] = aestheticScore;
 
                     emit fileProcessed(static_cast<int>(idx), result.rejected, QString::fromStdString(result.rejectReason), aestheticScore, w, h);
 
@@ -1446,6 +1450,51 @@ void AppBackend::runScannerTask() {
     for (size_t i = 0; i < m_files.size(); ++i) {
         bool isLead = (groupLead[i] == static_cast<int>(i));
         emit groupAssigned(static_cast<int>(i), groupLead[i], isLead, groupSize[groupLead[i]]);
+    }
+    
+    // Determine best shot in each group based on AI aesthetic score
+    // Only consider non-rejected images; if all are rejected, no best shot
+    std::map<int, int> bestShotInGroup;
+    for (size_t i = 0; i < m_files.size(); ++i) {
+        int lead = groupLead[i];
+    }
+
+    std::map<int, float> bestScoreInGroup;
+    std::map<int, int> bestIndexInGroup;
+    
+    for (size_t i = 0; i < m_files.size(); ++i) {
+        int lead = groupLead[i];
+        if (groupSize[lead] <= 1) continue; // Skip singletons
+        
+        float score = m_aestheticScores[i];
+        if (score <= 0.0f) continue; // Skip images without valid scores
+        
+        auto it = bestScoreInGroup.find(lead);
+        if (it == bestScoreInGroup.end() || score > it->second) {
+            bestScoreInGroup[lead] = score;
+            bestIndexInGroup[lead] = static_cast<int>(i);
+        }
+    }
+    
+    // Emit best shot assignments
+    for (const auto& pair : bestIndexInGroup) {
+        int leadIndex = pair.first;
+        int bestIndex = pair.second;
+        float bestScore = bestScoreInGroup[leadIndex];
+        
+        // Only mark as best shot if score is above threshold (e.g., > 4.0)
+        if (bestScore > 4.0f) {
+            emit bestShotAssigned(bestIndex, true, leadIndex);
+        }
+    }
+    
+    // Also emit false for non-best shots in groups with best shots
+    for (size_t i = 0; i < m_files.size(); ++i) {
+        int lead = groupLead[i];
+        if (groupSize[lead] <= 1) continue;
+        if (bestIndexInGroup.count(lead) && bestIndexInGroup[lead] != static_cast<int>(i)) {
+            emit bestShotAssigned(static_cast<int>(i), false, lead);
+        }
     }
 
     m_isScanning = false;
