@@ -54,6 +54,10 @@ PipelineRunner AppBackend::createPipeline() {
     {
         auto vhPre = std::make_unique<VisualHashPreprocessor>();
         vhPre->setEnabled(m_preprocessorModel.isEnabled("visual_hash"));
+        const auto& preSteps = m_preprocessorModel.getSteps();
+        for (const auto& s : preSteps) {
+            if (s.id == "visual_hash") { vhPre->setSettings(s.settings); break; }
+        }
         runner.addPreprocessor(std::move(vhPre));
     }
 
@@ -121,6 +125,10 @@ PipelineRunner AppBackend::createPipeline() {
     {
         auto clipPost = std::make_unique<ClipEmbeddingPostProcessor>();
         clipPost->setEnabled(m_postprocessorModel.isEnabled("clip_embedding"));
+        const auto& postSteps = m_postprocessorModel.getSteps();
+        for (const auto& s : postSteps) {
+            if (s.id == "clip_embedding") { clipPost->setSettings(s.settings); break; }
+        }
         runner.addPostProcessor(std::move(clipPost));
     }
 
@@ -1427,14 +1435,27 @@ void AppBackend::runScannerTask() {
     const bool useClipGrouping = m_postprocessorModel.isEnabled("clip_embedding");
     const bool useHashGrouping = m_preprocessorModel.isEnabled("visual_hash");
 
+    // Read grouping thresholds from step settings
+    int hammingThreshold = 20;
+    float clipThreshold = 0.90f;
+    if (useHashGrouping) {
+        for (const auto& s : m_preprocessorModel.getSteps())
+            if (s.id == "visual_hash" && s.settings.contains("hammingThreshold"))
+                hammingThreshold = s.settings["hammingThreshold"].toInt();
+    }
+    if (useClipGrouping) {
+        for (const auto& s : m_postprocessorModel.getSteps())
+            if (s.id == "clip_embedding" && s.settings.contains("cosineThreshold"))
+                clipThreshold = static_cast<float>(s.settings["cosineThreshold"].toDouble());
+    }
+
     if (useClipGrouping) {
         // ---------------------------------------------------------------
         // CLIP-cosine grouping
-        // Two images are in the same burst if cosine similarity >= 0.90.
+        // Two images are in the same burst if cosine similarity >= threshold.
         // Similarity is computed against the current group lead only
         // (same sequential O(N) pass as dHash grouping for consistency).
         // ---------------------------------------------------------------
-        constexpr float CLIP_THRESHOLD = 0.90f;
 
         for (size_t i = 0; i < m_files.size(); ++i) {
             const auto& vecI = m_clipVectors[i];
@@ -1449,7 +1470,7 @@ void AppBackend::runScannerTask() {
             float sim = 0.0f;
             for (int k = 0; k < 512; ++k) sim += vecI[k] * vecLead[k];
 
-            if (sim >= CLIP_THRESHOLD) {
+            if (sim >= clipThreshold) {
                 groupLead[i] = lastLead;
                 groupSize[lastLead]++;
                 qDebug() << "[CLIP group] photo" << i << "with lead" << lastLead
@@ -1473,7 +1494,7 @@ void AppBackend::runScannerTask() {
                 int dist = 0;
                 while (xor_val) { dist += xor_val & 1; xor_val >>= 1; }
 
-                if (dist <= 20) {
+                if (dist <= hammingThreshold) {
                     groupLead[i] = lastLead;
                     groupSize[lastLead]++;
                     qDebug() << "[Hash group] photo" << i << "with lead" << lastLead

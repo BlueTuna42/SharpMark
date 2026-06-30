@@ -553,9 +553,80 @@ property bool isGridView: true
                 }
             }
 
+            // Visual Hash grouping settings
+            ColumnLayout {
+                visible: stepSettingsPopup.stepId === "visual_hash"
+                spacing: 10
+                Layout.fillWidth: true
+
+                Text { text: "Hamming Distance Threshold"; color: textColor; font.pixelSize: 13 }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+                    Slider {
+                        id: hashThresholdSlider
+                        Layout.fillWidth: true
+                        from: 1; to: 64; stepSize: 1
+                        value: 20
+                        onValueChanged: hashThresholdValue.text = value.toFixed(0)
+                    }
+                    Text {
+                        id: hashThresholdValue
+                        text: "20"
+                        color: textColor
+                        font.pixelSize: 13
+                        Layout.preferredWidth: 40
+                    }
+                }
+                Text {
+                    text: "Max bit differences for two images to be grouped. Lower = stricter grouping."
+                    color: isLight ? "#888" : "#aaa"
+                    font.pixelSize: 11
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+            }
+
+            // CLIP Embedding grouping settings
+            ColumnLayout {
+                visible: stepSettingsPopup.stepId === "clip_embedding"
+                spacing: 10
+                Layout.fillWidth: true
+
+                Text { text: "Cosine Similarity Threshold"; color: textColor; font.pixelSize: 13 }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+                    Slider {
+                        id: clipThresholdSlider
+                        Layout.fillWidth: true
+                        from: 0.5; to: 1.0; stepSize: 0.01
+                        value: 0.90
+                        onValueChanged: clipThresholdValue.text = value.toFixed(2)
+                    }
+                    Text {
+                        id: clipThresholdValue
+                        text: "0.90"
+                        color: textColor
+                        font.pixelSize: 13
+                        Layout.preferredWidth: 40
+                    }
+                }
+                Text {
+                    text: "Minimum cosine similarity for two images to be grouped. Higher = stricter grouping."
+                    color: isLight ? "#888" : "#aaa"
+                    font.pixelSize: 11
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+            }
+
             // Default empty state for steps without settings
             ColumnLayout {
-                visible: stepSettingsPopup.stepId !== "exposure" && stepSettingsPopup.stepId !== "laplacian"
+                visible: stepSettingsPopup.stepId !== "exposure"
+                         && stepSettingsPopup.stepId !== "laplacian"
+                         && stepSettingsPopup.stepId !== "visual_hash"
+                         && stepSettingsPopup.stepId !== "clip_embedding"
                 Layout.fillWidth: true
                 spacing: 10
                 Text {
@@ -586,6 +657,10 @@ property bool isGridView: true
                             settings["clipThreshold"] = exposureSlider.value
                         } else if (stepSettingsPopup.stepId === "laplacian") {
                             settings["focusThreshold"] = laplacianSlider.value
+                        } else if (stepSettingsPopup.stepId === "visual_hash") {
+                            settings["hammingThreshold"] = hashThresholdSlider.value
+                        } else if (stepSettingsPopup.stepId === "clip_embedding") {
+                            settings["cosineThreshold"] = clipThresholdSlider.value
                         }
                         if (stepSettingsPopup.stepModel) {
                             stepSettingsPopup.stepModel.setStepSettings(
@@ -1159,6 +1234,8 @@ property bool isGridView: true
                                     var s = model.settings || ({})
                                     if (model.id === "exposure") exposureSlider.value = s.clipThreshold !== undefined ? s.clipThreshold : 0.15
                                     if (model.id === "laplacian") laplacianSlider.value = s.focusThreshold !== undefined ? s.focusThreshold : 150.0
+                                    if (model.id === "visual_hash") hashThresholdSlider.value = s.hammingThreshold !== undefined ? s.hammingThreshold : 20
+                                    if (model.id === "clip_embedding") clipThresholdSlider.value = s.cosineThreshold !== undefined ? s.cosineThreshold : 0.90
 
                                     stepSettingsPopup.open()
                                 }
@@ -1410,6 +1487,8 @@ property bool isGridView: true
                                     var s = model.settings || ({})
                                     if (model.id === "exposure") exposureSlider.value = s.clipThreshold !== undefined ? s.clipThreshold : 0.15
                                     if (model.id === "laplacian") laplacianSlider.value = s.focusThreshold !== undefined ? s.focusThreshold : 150.0
+                                    if (model.id === "visual_hash") hashThresholdSlider.value = s.hammingThreshold !== undefined ? s.hammingThreshold : 20
+                                    if (model.id === "clip_embedding") clipThresholdSlider.value = s.cosineThreshold !== undefined ? s.cosineThreshold : 0.90
 
                                     stepSettingsPopup.open()
                                 }

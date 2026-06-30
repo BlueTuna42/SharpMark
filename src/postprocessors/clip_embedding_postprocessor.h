@@ -3,26 +3,23 @@
 #include <fstream>
 #include <filesystem>
 #include <QDebug>
-
-// ClipEmbeddingPostProcessor
-// Persists the 512-float L2-normalised CLIP embedding produced by
-// AestheticProcessor to  <cacheDir>/<filename>.clip  as raw binary
-// (512 × float32 = 2048 bytes).
-//
-// The file is read back by:
-//   - AppBackend::getPhotoMetadata()  — live AI re-scoring in the info panel
-//   - AppBackend::setPhotoRating()    — active-learning training on star ratings
-//   - AppBackend::runScannerTask()    — CLIP-cosine burst grouping (when selected)
-//
-// Skips writing when:
-//   - disabled (isEnabled() == false)
-//   - result came from state-cache (no new embedding was computed)
-//   - "clip_vector" is absent from sharedData (AI scorer not in pipeline)
+#include <QVariantMap>
 
 class ClipEmbeddingPostProcessor : public IPostProcessor {
 public:
     std::string name() const override { return "clip_embedding"; }
     bool supportsDisable() const override { return true; }
+
+    QVariantMap settings() const override {
+        return {{"cosineThreshold", static_cast<double>(m_cosineThreshold)}};
+    }
+
+    void setSettings(const QVariantMap& s) override {
+        if (s.contains("cosineThreshold"))
+            m_cosineThreshold = static_cast<float>(s["cosineThreshold"].toDouble());
+    }
+
+    float cosineThreshold() const { return m_cosineThreshold; }
 
     void handle(const ProcessingContext& ctx, const ProcessingResult& result) override {
         // Respect enabled flag
@@ -57,4 +54,7 @@ public:
         qDebug() << "[ClipEmbed] Saved embedding for"
                  << QString::fromStdString(ctx.filePath.filename().string());
     }
+
+private:
+    float m_cosineThreshold = 0.90f;
 };

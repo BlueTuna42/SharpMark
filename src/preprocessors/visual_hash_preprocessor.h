@@ -4,6 +4,7 @@
 #include <sstream>
 #include <iomanip>
 #include <vector>
+#include <QVariantMap>
 
 // VisualHashPreprocessor
 // Computes a 64-bit dHash of the loaded image and stores it in:
@@ -14,6 +15,17 @@ class VisualHashPreprocessor : public IImagePreprocessor {
 public:
     std::string name() const override { return "visual_hash"; }
     bool supportsDisable() const override { return true; }
+
+    QVariantMap settings() const override {
+        return {{"hammingThreshold", m_hammingThreshold}};
+    }
+
+    void setSettings(const QVariantMap& s) override {
+        if (s.contains("hammingThreshold"))
+            m_hammingThreshold = s["hammingThreshold"].toInt();
+    }
+
+    int hammingThreshold() const { return m_hammingThreshold; }
 
     void preprocess(std::unique_ptr<GrayscaleImage>& image,
                     const ProcessingContext& /*ctx*/,
@@ -87,4 +99,7 @@ public:
 
         result.sharedData["visual_hash_u64"] = static_cast<double>(hash);
     }
+
+private:
+    int m_hammingThreshold = 20;
 };

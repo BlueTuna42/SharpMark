@@ -161,7 +161,7 @@ public:
     };
 
     explicit PreprocessorConfigModel(QObject *parent = nullptr) : QAbstractListModel(parent) {
-        m_steps.push_back({"visual_hash", "Burst Grouping (Visual Hash)", true,  true, {}});
+        m_steps.push_back({"visual_hash", "Burst Grouping (Visual Hash)", true,  true, {{"hammingThreshold", 20}}});
         m_steps.push_back({"lut_3d",      "Color LUT (3D)",               false, true, {}});
     }
 
@@ -269,7 +269,7 @@ public:
     };
 
     explicit PostprocessorConfigModel(QObject *parent = nullptr) : QAbstractListModel(parent) {
-        m_steps.push_back({"clip_embedding", "Burst Grouping (CLIP Embedding)", false, true, {}});
+        m_steps.push_back({"clip_embedding", "Burst Grouping (CLIP Embedding)", false, true, {{"cosineThreshold", 0.90}}});
     }
 
     void clear() { beginResetModel(); m_steps.clear(); endResetModel(); }
