@@ -436,6 +436,168 @@ property bool isGridView: true
         onAccepted: { resultsModel.clear(); backend.selectFolder(folderDialog.selectedFolder) }
     }
 
+    // ── Pipeline Step Settings Popup ───────────────────────────────────────
+    Popup {
+        id: stepSettingsPopup
+        x: Math.round((parent.width - width) / 2)
+        y: Math.round((parent.height - height) / 2)
+        property int minWidth: 380
+        width: Math.max(minWidth, titleMetrics.advanceWidth + 80)
+        height: 280
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+        property string stepId: ""
+        property string stepName: ""
+        property var stepModel: null
+        property int stepIndex: -1
+
+        TextMetrics {
+            id: titleMetrics
+            font.pixelSize: 20
+            font.bold: true
+            text: stepSettingsPopup.stepName + " Settings"
+        }
+
+        background: Rectangle {
+            color: popupBg
+            radius: 8
+            border.color: popupBorder
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 20
+            spacing: 15
+
+            Text {
+                text: stepSettingsPopup.stepName + " Settings"
+                color: textColor
+                font.pixelSize: 20
+                font.bold: true
+                Layout.alignment: Qt.AlignHCenter
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                height: 1
+                color: popupBorder
+            }
+
+            // Exposure settings
+            ColumnLayout {
+                visible: stepSettingsPopup.stepId === "exposure"
+                spacing: 10
+                Layout.fillWidth: true
+
+                Text { text: "Clip Threshold"; color: textColor; font.pixelSize: 13 }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+                    Slider {
+                        id: exposureSlider
+                        Layout.fillWidth: true
+                        from: 0.0; to: 1.0; stepSize: 0.01
+                        value: 0.15
+                        onValueChanged: exposureValue.text = value.toFixed(2)
+                    }
+                    Text {
+                        id: exposureValue
+                        text: "0.15"
+                        color: textColor
+                        font.pixelSize: 13
+                        Layout.preferredWidth: 40
+                    }
+                }
+                Text {
+                    text: "Reject image if more than this fraction of pixels are clipped."
+                    color: isLight ? "#888" : "#aaa"
+                    font.pixelSize: 11
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+            }
+
+            // Laplacian settings
+            ColumnLayout {
+                visible: stepSettingsPopup.stepId === "laplacian"
+                spacing: 10
+                Layout.fillWidth: true
+
+                Text { text: "Focus Threshold"; color: textColor; font.pixelSize: 13 }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+                    Slider {
+                        id: laplacianSlider
+                        Layout.fillWidth: true
+                        from: 10.0; to: 500.0; stepSize: 1.0
+                        value: 150.0
+                        onValueChanged: laplacianValue.text = value.toFixed(0)
+                    }
+                    Text {
+                        id: laplacianValue
+                        text: "150"
+                        color: textColor
+                        font.pixelSize: 13
+                        Layout.preferredWidth: 40
+                    }
+                }
+                Text {
+                    text: "Images with Laplacian variance below this value are marked blurry."
+                    color: isLight ? "#888" : "#aaa"
+                    font.pixelSize: 11
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+            }
+
+            // Default empty state for steps without settings
+            ColumnLayout {
+                visible: stepSettingsPopup.stepId !== "exposure" && stepSettingsPopup.stepId !== "laplacian"
+                Layout.fillWidth: true
+                spacing: 10
+                Text {
+                    text: "No configurable settings for this step."
+                    color: isLight ? "#888" : "#aaa"
+                    font.pixelSize: 13
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                }
+            }
+
+            Item { Layout.fillHeight: true }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 10
+                Item { Layout.fillWidth: true }
+                StyledButton {
+                    text: "Cancel"
+                    onClicked: stepSettingsPopup.close()
+                }
+                StyledButton {
+                    text: "Apply"
+                    isPrimary: true
+                    onClicked: {
+                        var settings = ({})
+                        if (stepSettingsPopup.stepId === "exposure") {
+                            settings["clipThreshold"] = exposureSlider.value
+                        } else if (stepSettingsPopup.stepId === "laplacian") {
+                            settings["focusThreshold"] = laplacianSlider.value
+                        }
+                        if (stepSettingsPopup.stepModel) {
+                            stepSettingsPopup.stepModel.setStepSettings(
+                                stepSettingsPopup.stepIndex, settings)
+                        }
+                        stepSettingsPopup.close()
+                    }
+                }
+            }
+        }
+    }
+
     Popup {
         id: settingsPopup
         x: Math.round((parent.width - width) / 2)
@@ -956,7 +1118,7 @@ property bool isGridView: true
                         RowLayout {
                             anchors.fill: parent
                             anchors.leftMargin: 10
-                            anchors.rightMargin: 10
+                            anchors.rightMargin: 6
                             spacing: 8
 
                             CheckBox {
@@ -977,6 +1139,37 @@ property bool isGridView: true
                                 color: model.enabled ? textColor : (isLight ? "#999" : "#666")
                                 Layout.fillWidth: true
                                 font.pixelSize: 13
+                                elide: Text.ElideRight
+                            }
+
+                            // Gear icon for step settings
+                            Button {
+                                Layout.preferredWidth: 22
+                                Layout.preferredHeight: 22
+                                flat: true
+                                hoverEnabled: true
+                                opacity: parent.hovered ? 0.8 : 0.35
+                                Behavior on opacity { NumberAnimation { duration: 120 } }
+                                onClicked: {
+                                    stepSettingsPopup.stepId = model.id
+                                    stepSettingsPopup.stepName = model.name
+                                    stepSettingsPopup.stepModel = backend.preprocessorModel
+                                    stepSettingsPopup.stepIndex = model.index
+
+                                    var s = model.settings || ({})
+                                    if (model.id === "exposure") exposureSlider.value = s.clipThreshold !== undefined ? s.clipThreshold : 0.15
+                                    if (model.id === "laplacian") laplacianSlider.value = s.focusThreshold !== undefined ? s.focusThreshold : 150.0
+
+                                    stepSettingsPopup.open()
+                                }
+                                contentItem: Text {
+                                    text: "⚙"
+                                    font.pixelSize: 13
+                                    color: textColor
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                background: null
                             }
                         }
                     }
@@ -1064,15 +1257,48 @@ property bool isGridView: true
                                         color: model.enabled ? textColor : (isLight ? "#999" : "#666")
                                         Layout.fillWidth: true
                                         font.pixelSize: 13
+                                        elide: Text.ElideRight
+                                    }
+
+                                    // Gear icon for step settings
+                                    Button {
+                                        Layout.preferredWidth: 22
+                                        Layout.preferredHeight: 22
+                                        flat: true
+                                        hoverEnabled: true
+                                        opacity: parent.hovered ? 0.8 : 0.35
+                                        Behavior on opacity { NumberAnimation { duration: 120 } }
+                                        onClicked: {
+                                            stepSettingsPopup.stepId = model.id
+                                            stepSettingsPopup.stepName = model.name
+                                            stepSettingsPopup.stepModel = backend.pipelineModel
+                                            stepSettingsPopup.stepIndex = model.index
+
+                                            var s = model.settings || ({})
+                                            if (model.id === "exposure") exposureSlider.value = s.clipThreshold !== undefined ? s.clipThreshold : 0.15
+                                            if (model.id === "laplacian") laplacianSlider.value = s.focusThreshold !== undefined ? s.focusThreshold : 150.0
+
+                                            stepSettingsPopup.open()
+                                        }
+                                        contentItem: Text {
+                                            text: "⚙"
+                                            font.pixelSize: 13
+                                            color: textColor
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
+                                        background: null
                                     }
                                 }
 
-                                // Drag handle covers the full card — checkbox still works
-                                // because CheckBox has its own MouseArea that accepts the press
-                                // before this one sees it (z-order / child priority).
+                                // Drag handle covers the card — but NOT the gear button on the right
                                 MouseArea {
                                     id: dragArea
-                                    anchors.fill: parent
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    anchors.bottom: parent.bottom
+                                    anchors.rightMargin: 30
                                     propagateComposedEvents: true
                                     drag.target: itemRect
                                     drag.axis: Drag.YAxis
@@ -1143,7 +1369,7 @@ property bool isGridView: true
                         RowLayout {
                             anchors.fill: parent
                             anchors.leftMargin: 10
-                            anchors.rightMargin: 10
+                            anchors.rightMargin: 6
                             spacing: 8
 
                             CheckBox {
@@ -1164,6 +1390,37 @@ property bool isGridView: true
                                 color: model.enabled ? textColor : (isLight ? "#999" : "#666")
                                 Layout.fillWidth: true
                                 font.pixelSize: 13
+                                elide: Text.ElideRight
+                            }
+
+                            // Gear icon for step settings
+                            Button {
+                                Layout.preferredWidth: 22
+                                Layout.preferredHeight: 22
+                                flat: true
+                                hoverEnabled: true
+                                opacity: parent.hovered ? 0.8 : 0.35
+                                Behavior on opacity { NumberAnimation { duration: 120 } }
+                                onClicked: {
+                                    stepSettingsPopup.stepId = model.id
+                                    stepSettingsPopup.stepName = model.name
+                                    stepSettingsPopup.stepModel = backend.postprocessorModel
+                                    stepSettingsPopup.stepIndex = model.index
+
+                                    var s = model.settings || ({})
+                                    if (model.id === "exposure") exposureSlider.value = s.clipThreshold !== undefined ? s.clipThreshold : 0.15
+                                    if (model.id === "laplacian") laplacianSlider.value = s.focusThreshold !== undefined ? s.focusThreshold : 150.0
+
+                                    stepSettingsPopup.open()
+                                }
+                                contentItem: Text {
+                                    text: "⚙"
+                                    font.pixelSize: 13
+                                    color: textColor
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                background: null
                             }
                         }
                     }

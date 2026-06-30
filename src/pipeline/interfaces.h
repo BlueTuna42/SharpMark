@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <unordered_map>
 #include <QString>
+#include <QVariantMap>
 #include "../struct.h"
 #include "../gui/gui.h"
 
@@ -48,6 +49,10 @@ public:
     }
 
     virtual void process(std::unique_ptr<GrayscaleImage>& image, const ProcessingContext& ctx, ProcessingResult& result) = 0;
+
+    // Per-instance settings
+    virtual QVariantMap settings() const { return {}; }
+    virtual void setSettings(const QVariantMap& /*s*/) {}
 };
 
 class IPostProcessor {
@@ -62,6 +67,10 @@ public:
     virtual bool supportsDisable() const { return true; }
 
     virtual void handle(const ProcessingContext& ctx, const ProcessingResult& result) = 0;
+
+    // Per-instance settings
+    virtual QVariantMap settings() const { return {}; }
+    virtual void setSettings(const QVariantMap& /*s*/) {}
 protected:
     bool m_enabled = true;
 };
@@ -90,6 +99,10 @@ public:
     virtual void preprocess(std::unique_ptr<GrayscaleImage>& image,
                             const ProcessingContext& ctx,
                             ProcessingResult& result) = 0;
+
+    // Per-instance settings
+    virtual QVariantMap settings() const { return {}; }
+    virtual void setSettings(const QVariantMap& /*s*/) {}
 protected:
     bool m_enabled = true;
 };

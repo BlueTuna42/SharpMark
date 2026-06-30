@@ -9,6 +9,8 @@
 #include <QDir>
 #include <QFile>
 #include <QBuffer>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <fstream>
 #include <libraw/libraw.h>
 #include <QVariantMap>
@@ -92,9 +94,13 @@ PipelineRunner AppBackend::createPipeline() {
         if (!step.enabled) continue;
 
         if (step.id == "exposure") {
-            runner.addProcessor(std::make_unique<ExposureCheckProcessor>());
+            auto proc = std::make_unique<ExposureCheckProcessor>();
+            proc->setSettings(step.settings);
+            runner.addProcessor(std::move(proc));
         } else if (step.id == "laplacian") {
-            runner.addProcessor(std::make_unique<LaplacianFocusProcessor>());
+            auto proc = std::make_unique<LaplacianFocusProcessor>();
+            proc->setSettings(step.settings);
+            runner.addProcessor(std::move(proc));
         } else if (step.id == "aiaesthetic") {
             std::filesystem::path appDataDir = get_app_config_dir();
 #ifdef _WIN32
@@ -102,7 +108,9 @@ PipelineRunner AppBackend::createPipeline() {
 #else
             std::filesystem::path modelsDir(QCoreApplication::applicationDirPath().toUtf8().constData());
 #endif
-            runner.addProcessor(std::make_unique<AestheticProcessor>(modelsDir, appDataDir));
+            auto proc = std::make_unique<AestheticProcessor>(modelsDir, appDataDir);
+            proc->setSettings(step.settings);
+            runner.addProcessor(std::move(proc));
         }
     }
 
@@ -917,14 +925,24 @@ void AppBackend::loadSettings() {
                     int colonIdx = token.indexOf(':');
                     if (colonIdx != -1) {
                         QString id      = token.left(colonIdx);
-                        bool    enabled = (token.mid(colonIdx + 1) == "1");
+                        QString rest    = token.mid(colonIdx + 1);
+
+                        // rest format: "enabled" or "enabled:{...json...}"
+                        bool enabled = (rest.left(1) == "1");
+                        QVariantMap settings;
+                        int braceIdx = rest.indexOf('{');
+                        if (braceIdx != -1) {
+                            QJsonDocument doc = QJsonDocument::fromJson(rest.mid(braceIdx).toUtf8());
+                            if (doc.isObject())
+                                settings = doc.object().toVariantMap();
+                        }
 
                         QString name = id;
                         if (id == "exposure")    name = "Exposure Check";
                         if (id == "laplacian")   name = "Laplacian Focus Check";
                         if (id == "aiaesthetic") name = "AI Aesthetic Scorer";
 
-                        m_pipelineModel.addStep(id, name, enabled);
+                        m_pipelineModel.addStep(id, name, enabled, settings);
                         loadedIds.push_back(id);
                     }
                 }
@@ -937,14 +955,23 @@ void AppBackend::loadSettings() {
                     int colonIdx = token.indexOf(':');
                     if (colonIdx != -1) {
                         QString id      = token.left(colonIdx);
-                        bool    enabled = (token.mid(colonIdx + 1) == "1");
+                        QString rest    = token.mid(colonIdx + 1);
+
+                        bool enabled = (rest.left(1) == "1");
+                        QVariantMap settings;
+                        int braceIdx = rest.indexOf('{');
+                        if (braceIdx != -1) {
+                            QJsonDocument doc = QJsonDocument::fromJson(rest.mid(braceIdx).toUtf8());
+                            if (doc.isObject())
+                                settings = doc.object().toVariantMap();
+                        }
 
                         QString name = id;
                         bool    canDisable = true;
                         if (id == "visual_hash") { name = "Burst Grouping (Visual Hash)"; canDisable = true; }
                         if (id == "lut_3d")      { name = "Color LUT (3D)";               canDisable = true; }
 
-                        m_preprocessorModel.addStep(id, name, enabled, canDisable);
+                        m_preprocessorModel.addStep(id, name, enabled, canDisable, settings);
                         loadedPreIds.push_back(id);
                     }
                 }
@@ -957,13 +984,22 @@ void AppBackend::loadSettings() {
                     int colonIdx = token.indexOf(':');
                     if (colonIdx != -1) {
                         QString id      = token.left(colonIdx);
-                        bool    enabled = (token.mid(colonIdx + 1) == "1");
+                        QString rest    = token.mid(colonIdx + 1);
+
+                        bool enabled = (rest.left(1) == "1");
+                        QVariantMap settings;
+                        int braceIdx = rest.indexOf('{');
+                        if (braceIdx != -1) {
+                            QJsonDocument doc = QJsonDocument::fromJson(rest.mid(braceIdx).toUtf8());
+                            if (doc.isObject())
+                                settings = doc.object().toVariantMap();
+                        }
 
                         QString name = id;
                         bool    canDisable = true;
                         if (id == "clip_embedding") { name = "Burst Grouping (CLIP Embedding)"; canDisable = true; }
 
-                        m_postprocessorModel.addStep(id, name, enabled, canDisable);
+                        m_postprocessorModel.addStep(id, name, enabled, canDisable, settings);
                         loadedPostIds.push_back(id);
                     }
                 }
@@ -976,16 +1012,16 @@ void AppBackend::loadSettings() {
     // If config didn't exist at all, clear and load defaults
     if (!pipelineLoaded) {
         m_pipelineModel.clear();
-        m_pipelineModel.addStep("exposure", "Exposure Check", true);
-        m_pipelineModel.addStep("laplacian", "Laplacian Focus Check", true);
+        m_pipelineModel.addStep("exposure", "Exposure Check", true, {{"clipThreshold", 0.15}});
+        m_pipelineModel.addStep("laplacian", "Laplacian Focus Check", true, {{"focusThreshold", 150.0}});
         m_pipelineModel.addStep("aiaesthetic", "AI Aesthetic Scorer", true);
     } else {
         // MERGE: If the config loaded, but is missing new tools, append them at the end.
         if (std::find(loadedIds.begin(), loadedIds.end(), "exposure") == loadedIds.end()) {
-            m_pipelineModel.addStep("exposure", "Exposure Check", true);
+            m_pipelineModel.addStep("exposure", "Exposure Check", true, {{"clipThreshold", 0.15}});
         }
         if (std::find(loadedIds.begin(), loadedIds.end(), "laplacian") == loadedIds.end()) {
-            m_pipelineModel.addStep("laplacian", "Laplacian Focus Check", true);
+            m_pipelineModel.addStep("laplacian", "Laplacian Focus Check", true, {{"focusThreshold", 150.0}});
         }
         if (std::find(loadedIds.begin(), loadedIds.end(), "aiaesthetic") == loadedIds.end()) {
             m_pipelineModel.addStep("aiaesthetic", "AI Aesthetic Scorer", true);
@@ -1041,6 +1077,9 @@ void AppBackend::saveSettings() {
     const auto& steps = m_pipelineModel.getSteps();
     for (size_t i = 0; i < steps.size(); ++i) {
         out << steps[i].id << ":" << (steps[i].enabled ? 1 : 0);
+        if (!steps[i].settings.isEmpty()) {
+            out << ":" << QJsonDocument(QJsonObject::fromVariantMap(steps[i].settings)).toJson(QJsonDocument::Compact);
+        }
         if (i < steps.size() - 1) out << ",";
     }
     out << "\n";
@@ -1049,6 +1088,9 @@ void AppBackend::saveSettings() {
     const auto& preSteps = m_preprocessorModel.getSteps();
     for (size_t i = 0; i < preSteps.size(); ++i) {
         out << preSteps[i].id << ":" << (preSteps[i].enabled ? 1 : 0);
+        if (!preSteps[i].settings.isEmpty()) {
+            out << ":" << QJsonDocument(QJsonObject::fromVariantMap(preSteps[i].settings)).toJson(QJsonDocument::Compact);
+        }
         if (i < preSteps.size() - 1) out << ",";
     }
     out << "\n";
@@ -1057,6 +1099,9 @@ void AppBackend::saveSettings() {
     const auto& postSteps = m_postprocessorModel.getSteps();
     for (size_t i = 0; i < postSteps.size(); ++i) {
         out << postSteps[i].id << ":" << (postSteps[i].enabled ? 1 : 0);
+        if (!postSteps[i].settings.isEmpty()) {
+            out << ":" << QJsonDocument(QJsonObject::fromVariantMap(postSteps[i].settings)).toJson(QJsonDocument::Compact);
+        }
         if (i < postSteps.size() - 1) out << ",";
     }
     out << "\n";

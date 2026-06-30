@@ -25,21 +25,22 @@ public:
     enum Roles {
         IdRole = Qt::UserRole + 1,
         NameRole,
-        EnabledRole
+        EnabledRole,
+        SettingsRole
     };
 
     struct Step {
         QString id;
         QString name;
         bool enabled;
-        // In the future, you can add parameters here (e.g., float threshold)
+        QVariantMap settings;
     };
 
     explicit PipelineConfigModel(QObject *parent = nullptr) : QAbstractListModel(parent) {
         // Initialize with default tools
-        m_steps.push_back({"exposure", "Exposure Check", true});
-        m_steps.push_back({"laplacian", "Laplacian Focus Check", true});
-        m_steps.push_back({"aiaesthetic", "AI Aesthetic Scorer", true});
+        m_steps.push_back({"exposure", "Exposure Check", true, {{"clipThreshold", 0.15}}});
+        m_steps.push_back({"laplacian", "Laplacian Focus Check", true, {{"focusThreshold", 150.0}}});
+        m_steps.push_back({"aiaesthetic", "AI Aesthetic Scorer", true, {}});
     }
 
     void clear() {
@@ -47,9 +48,9 @@ public:
         m_steps.clear();
         endResetModel();
     }
-    void addStep(const QString& id, const QString& name, bool enabled) {
+    void addStep(const QString& id, const QString& name, bool enabled, const QVariantMap& settings = {}) {
         beginInsertRows(QModelIndex(), m_steps.size(), m_steps.size());
-        m_steps.push_back({id, name, enabled});
+        m_steps.push_back({id, name, enabled, settings});
         endInsertRows();
     }
 
@@ -67,6 +68,7 @@ public:
             case IdRole: return step.id;
             case NameRole: return step.name;
             case EnabledRole: return step.enabled;
+            case SettingsRole: return QVariant(step.settings);
             default: return QVariant();
         }
     }
@@ -89,6 +91,7 @@ public:
         roles[IdRole] = "id";
         roles[NameRole] = "name";
         roles[EnabledRole] = "enabled";
+        roles[SettingsRole] = "settings";
         return roles;
     }
 
@@ -96,6 +99,14 @@ public:
         if (index >= 0 && index < m_steps.size()) {
             m_steps[index].enabled = enabled;
             emit dataChanged(this->index(index), this->index(index), {EnabledRole});
+            emit pipelineChanged();
+        }
+    }
+
+    Q_INVOKABLE void setStepSettings(int index, const QVariantMap& settings) {
+        if (index >= 0 && index < m_steps.size()) {
+            m_steps[index].settings = settings;
+            emit dataChanged(this->index(index), this->index(index), {SettingsRole});
             emit pipelineChanged();
         }
     }
@@ -137,7 +148,8 @@ public:
         IdRole = Qt::UserRole + 1,
         NameRole,
         EnabledRole,
-        SupportsDisableRole
+        SupportsDisableRole,
+        SettingsRole
     };
 
     struct Step {
@@ -145,18 +157,19 @@ public:
         QString name;
         bool    enabled;
         bool    supportsDisable;
+        QVariantMap settings;
     };
 
     explicit PreprocessorConfigModel(QObject *parent = nullptr) : QAbstractListModel(parent) {
-        m_steps.push_back({"visual_hash", "Burst Grouping (Visual Hash)", true,  true});
-        m_steps.push_back({"lut_3d",      "Color LUT (3D)",               false, true});
+        m_steps.push_back({"visual_hash", "Burst Grouping (Visual Hash)", true,  true, {}});
+        m_steps.push_back({"lut_3d",      "Color LUT (3D)",               false, true, {}});
     }
 
     void clear() { beginResetModel(); m_steps.clear(); endResetModel(); }
 
-    void addStep(const QString& id, const QString& name, bool enabled, bool supportsDisable) {
+    void addStep(const QString& id, const QString& name, bool enabled, bool supportsDisable, const QVariantMap& settings = {}) {
         beginInsertRows(QModelIndex(), m_steps.size(), m_steps.size());
-        m_steps.push_back({id, name, enabled, supportsDisable});
+        m_steps.push_back({id, name, enabled, supportsDisable, settings});
         endInsertRows();
     }
 
@@ -174,6 +187,7 @@ public:
             case NameRole:           return s.name;
             case EnabledRole:        return s.enabled;
             case SupportsDisableRole:return s.supportsDisable;
+            case SettingsRole:       return QVariant(s.settings);
             default:                 return QVariant();
         }
     }
@@ -194,6 +208,7 @@ public:
         roles[NameRole]            = "name";
         roles[EnabledRole]         = "enabled";
         roles[SupportsDisableRole] = "supportsDisable";
+        roles[SettingsRole]        = "settings";
         return roles;
     }
 
@@ -201,6 +216,14 @@ public:
         if (index >= 0 && index < static_cast<int>(m_steps.size())) {
             m_steps[index].enabled = enabled;
             emit dataChanged(this->index(index), this->index(index), {EnabledRole});
+            emit preprocessorChanged();
+        }
+    }
+
+    Q_INVOKABLE void setStepSettings(int index, const QVariantMap& settings) {
+        if (index >= 0 && index < static_cast<int>(m_steps.size())) {
+            m_steps[index].settings = settings;
+            emit dataChanged(this->index(index), this->index(index), {SettingsRole});
             emit preprocessorChanged();
         }
     }
@@ -233,7 +256,8 @@ public:
         IdRole = Qt::UserRole + 1,
         NameRole,
         EnabledRole,
-        SupportsDisableRole
+        SupportsDisableRole,
+        SettingsRole
     };
 
     struct Step {
@@ -241,17 +265,18 @@ public:
         QString name;
         bool    enabled;
         bool    supportsDisable;
+        QVariantMap settings;
     };
 
     explicit PostprocessorConfigModel(QObject *parent = nullptr) : QAbstractListModel(parent) {
-        m_steps.push_back({"clip_embedding", "Burst Grouping (CLIP Embedding)", false, true});
+        m_steps.push_back({"clip_embedding", "Burst Grouping (CLIP Embedding)", false, true, {}});
     }
 
     void clear() { beginResetModel(); m_steps.clear(); endResetModel(); }
 
-    void addStep(const QString& id, const QString& name, bool enabled, bool supportsDisable) {
+    void addStep(const QString& id, const QString& name, bool enabled, bool supportsDisable, const QVariantMap& settings = {}) {
         beginInsertRows(QModelIndex(), m_steps.size(), m_steps.size());
-        m_steps.push_back({id, name, enabled, supportsDisable});
+        m_steps.push_back({id, name, enabled, supportsDisable, settings});
         endInsertRows();
     }
 
@@ -269,6 +294,7 @@ public:
             case NameRole:            return s.name;
             case EnabledRole:         return s.enabled;
             case SupportsDisableRole: return s.supportsDisable;
+            case SettingsRole:        return QVariant(s.settings);
             default:                  return QVariant();
         }
     }
@@ -289,6 +315,7 @@ public:
         roles[NameRole]            = "name";
         roles[EnabledRole]         = "enabled";
         roles[SupportsDisableRole] = "supportsDisable";
+        roles[SettingsRole]        = "settings";
         return roles;
     }
 
@@ -296,6 +323,14 @@ public:
         if (index >= 0 && index < static_cast<int>(m_steps.size())) {
             m_steps[index].enabled = enabled;
             emit dataChanged(this->index(index), this->index(index), {EnabledRole});
+            emit postprocessorChanged();
+        }
+    }
+
+    Q_INVOKABLE void setStepSettings(int index, const QVariantMap& settings) {
+        if (index >= 0 && index < static_cast<int>(m_steps.size())) {
+            m_steps[index].settings = settings;
+            emit dataChanged(this->index(index), this->index(index), {SettingsRole});
             emit postprocessorChanged();
         }
     }

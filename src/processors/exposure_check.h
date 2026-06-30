@@ -1,6 +1,7 @@
 #pragma once
 #include "../pipeline/interfaces.h"
 #include <string>
+#include <QVariantMap>
 
 class ExposureCheckProcessor : public IImageProcessor {
 private:
@@ -11,6 +12,15 @@ public:
 
     std::string name() const override { return "exposure_check"; }
     bool supports(const ProcessingContext& ctx) const override { return true; }
+
+    QVariantMap settings() const override {
+        return {{"clipThreshold", static_cast<double>(m_clipThreshold)}};
+    }
+
+    void setSettings(const QVariantMap& s) override {
+        if (s.contains("clipThreshold"))
+            m_clipThreshold = static_cast<float>(s["clipThreshold"].toDouble());
+    }
 
     bool tryProcessFromCache(const ProcessingContext& ctx, ProcessingResult& result) override {
         // StateCacheProcessor restores underexposed_pct / overexposed_pct into sharedData
