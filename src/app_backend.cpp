@@ -138,7 +138,12 @@ PipelineRunner AppBackend::createPipeline() {
 AppBackend::AppBackend(QObject *parent)
     : QObject(parent), m_statusText("Ready") {
     connect(&m_pipelineModel,      &PipelineConfigModel::pipelineChanged,
-            this, [this]() { if (!m_loadingSettings) saveSettings(); });
+            this, [this]() {
+                if (!m_loadingSettings) {
+                    syncAiSettingsFromModel();
+                    saveSettings();
+                }
+            });
     connect(&m_preprocessorModel,  &PreprocessorConfigModel::preprocessorChanged,
             this, [this]() {
                 if (m_loadingSettings) return;
@@ -908,6 +913,12 @@ void AppBackend::loadSettings() {
     bool preprocessorLoaded  = false;
     bool postprocessorLoaded = false;
 
+    // Collect settings separately — they must be applied AFTER model is built
+    // (the pipeline/pre/post lines call clear() which would discard them)
+    QMap<QString, QVariantMap> loadedPipelineSettings;
+    QMap<QString, QVariantMap> loadedPreprocessorSettings;
+    QMap<QString, QVariantMap> loadedPostprocessorSettings;
+
     QFile qf(getSettingsFilePath());
     if (qf.open(QIODevice::ReadOnly | QIODevice::Text)) {
         QTextStream in(&qf);
@@ -926,31 +937,37 @@ void AppBackend::loadSettings() {
             else if (key == "groupBursts") m_groupBursts = (value == "1");
             else if (key == "lutEnabled") m_lutEnabled = (value == "1");
             else if (key == "lutPreset")  m_activeLutName = value.trimmed();
+            else if (key.startsWith("pipeline_settings_") || key.startsWith("preprocessor_settings_") || key.startsWith("postprocessor_settings_")) {
+                QJsonDocument doc = QJsonDocument::fromJson(value.toUtf8());
+                if (doc.isObject()) {
+                    QVariantMap settings = doc.object().toVariantMap();
+                    if (key.startsWith("pipeline_settings_"))
+                        loadedPipelineSettings[key.mid(QString("pipeline_settings_").length())] = settings;
+                    else if (key.startsWith("preprocessor_settings_"))
+                        loadedPreprocessorSettings[key.mid(QString("preprocessor_settings_").length())] = settings;
+                    else if (key.startsWith("postprocessor_settings_"))
+                        loadedPostprocessorSettings[key.mid(QString("postprocessor_settings_").length())] = settings;
+                }
+            }
             else if (key == "pipeline") {
                 m_pipelineModel.clear();
                 const QStringList tokens = value.split(',');
                 for (const QString& token : tokens) {
                     int colonIdx = token.indexOf(':');
                     if (colonIdx != -1) {
-                        QString id      = token.left(colonIdx);
-                        QString rest    = token.mid(colonIdx + 1);
-
-                        // rest format: "enabled" or "enabled:{...json...}"
-                        bool enabled = (rest.left(1) == "1");
-                        QVariantMap settings;
-                        int braceIdx = rest.indexOf('{');
-                        if (braceIdx != -1) {
-                            QJsonDocument doc = QJsonDocument::fromJson(rest.mid(braceIdx).toUtf8());
-                            if (doc.isObject())
-                                settings = doc.object().toVariantMap();
-                        }
+                        QString id = token.left(colonIdx);
+                        // Skip phantom steps from old broken config format
+                        if (id.startsWith('{') || id.startsWith('"') || id.startsWith('}'))
+                            continue;
+                        bool enabled = (token.mid(colonIdx + 1) == "1");
 
                         QString name = id;
                         if (id == "exposure")    name = "Exposure Check";
-                        if (id == "laplacian")   name = "Laplacian Focus Check";
-                        if (id == "aiaesthetic") name = "AI Aesthetic Scorer";
+                        else if (id == "laplacian")   name = "Laplacian Focus Check";
+                        else if (id == "aiaesthetic") name = "AI Aesthetic Scorer";
+                        else continue; // Unknown step, skip
 
-                        m_pipelineModel.addStep(id, name, enabled, settings);
+                        m_pipelineModel.addStep(id, name, enabled);
                         loadedIds.push_back(id);
                     }
                 }
@@ -962,24 +979,18 @@ void AppBackend::loadSettings() {
                 for (const QString& token : tokens) {
                     int colonIdx = token.indexOf(':');
                     if (colonIdx != -1) {
-                        QString id      = token.left(colonIdx);
-                        QString rest    = token.mid(colonIdx + 1);
-
-                        bool enabled = (rest.left(1) == "1");
-                        QVariantMap settings;
-                        int braceIdx = rest.indexOf('{');
-                        if (braceIdx != -1) {
-                            QJsonDocument doc = QJsonDocument::fromJson(rest.mid(braceIdx).toUtf8());
-                            if (doc.isObject())
-                                settings = doc.object().toVariantMap();
-                        }
+                        QString id = token.left(colonIdx);
+                        if (id.startsWith('{') || id.startsWith('"') || id.startsWith('}'))
+                            continue;
+                        bool enabled = (token.mid(colonIdx + 1) == "1");
 
                         QString name = id;
-                        bool    canDisable = true;
+                        bool canDisable = true;
                         if (id == "visual_hash") { name = "Burst Grouping (Visual Hash)"; canDisable = true; }
-                        if (id == "lut_3d")      { name = "Color LUT (3D)";               canDisable = true; }
+                        else if (id == "lut_3d") { name = "Color LUT (3D)"; canDisable = true; }
+                        else continue;
 
-                        m_preprocessorModel.addStep(id, name, enabled, canDisable, settings);
+                        m_preprocessorModel.addStep(id, name, enabled, canDisable);
                         loadedPreIds.push_back(id);
                     }
                 }
@@ -991,23 +1002,17 @@ void AppBackend::loadSettings() {
                 for (const QString& token : tokens) {
                     int colonIdx = token.indexOf(':');
                     if (colonIdx != -1) {
-                        QString id      = token.left(colonIdx);
-                        QString rest    = token.mid(colonIdx + 1);
-
-                        bool enabled = (rest.left(1) == "1");
-                        QVariantMap settings;
-                        int braceIdx = rest.indexOf('{');
-                        if (braceIdx != -1) {
-                            QJsonDocument doc = QJsonDocument::fromJson(rest.mid(braceIdx).toUtf8());
-                            if (doc.isObject())
-                                settings = doc.object().toVariantMap();
-                        }
+                        QString id = token.left(colonIdx);
+                        if (id.startsWith('{') || id.startsWith('"') || id.startsWith('}'))
+                            continue;
+                        bool enabled = (token.mid(colonIdx + 1) == "1");
 
                         QString name = id;
-                        bool    canDisable = true;
+                        bool canDisable = true;
                         if (id == "clip_embedding") { name = "Burst Grouping (CLIP Embedding)"; canDisable = true; }
+                        else continue;
 
-                        m_postprocessorModel.addStep(id, name, enabled, canDisable, settings);
+                        m_postprocessorModel.addStep(id, name, enabled, canDisable);
                         loadedPostIds.push_back(id);
                     }
                 }
@@ -1031,8 +1036,8 @@ void AppBackend::loadSettings() {
         if (std::find(loadedIds.begin(), loadedIds.end(), "laplacian") == loadedIds.end()) {
             m_pipelineModel.addStep("laplacian", "Laplacian Focus Check", true, {{"focusThreshold", 150.0}});
         }
-        if (std::find(loadedIds.begin(), loadedIds.end(), "aiaesthetic") == loadedIds.end()) {
-            m_pipelineModel.addStep("aiaesthetic", "AI Aesthetic Scorer", true);
+if (std::find(loadedIds.begin(), loadedIds.end(), "aiaesthetic") == loadedIds.end()) {
+            m_pipelineModel.addStep("aiaesthetic", "AI Aesthetic Scorer", true, {{"showScore", true}, {"colorScore", true}, {"applyUserBias", true}});
         }
     }
 
@@ -1063,7 +1068,37 @@ void AppBackend::loadSettings() {
             m_postprocessorModel.addStep("clip_embedding", "Burst Grouping (CLIP Embedding)", false, true);
     }
 
+    // Apply collected settings now that all models are fully built
+    for (auto it = loadedPipelineSettings.begin(); it != loadedPipelineSettings.end(); ++it) {
+        const auto& steps = m_pipelineModel.getSteps();
+        for (int i = 0; i < static_cast<int>(steps.size()); ++i) {
+            if (steps[i].id == it.key()) {
+                m_pipelineModel.setStepSettings(i, it.value());
+                break;
+            }
+        }
+    }
+    for (auto it = loadedPreprocessorSettings.begin(); it != loadedPreprocessorSettings.end(); ++it) {
+        const auto& steps = m_preprocessorModel.getSteps();
+        for (int i = 0; i < static_cast<int>(steps.size()); ++i) {
+            if (steps[i].id == it.key()) {
+                m_preprocessorModel.setStepSettings(i, it.value());
+                break;
+            }
+        }
+    }
+    for (auto it = loadedPostprocessorSettings.begin(); it != loadedPostprocessorSettings.end(); ++it) {
+        const auto& steps = m_postprocessorModel.getSteps();
+        for (int i = 0; i < static_cast<int>(steps.size()); ++i) {
+            if (steps[i].id == it.key()) {
+                m_postprocessorModel.setStepSettings(i, it.value());
+                break;
+            }
+        }
+    }
+
     m_loadingSettings = false;
+    syncAiSettingsFromModel();
 }
 
 void AppBackend::saveSettings() {
@@ -1084,37 +1119,132 @@ void AppBackend::saveSettings() {
     out << "pipeline=";
     const auto& steps = m_pipelineModel.getSteps();
     for (size_t i = 0; i < steps.size(); ++i) {
+        // Only save known step IDs — skip phantom entries from old configs
+        if (steps[i].id != "exposure" && steps[i].id != "laplacian" && steps[i].id != "aiaesthetic")
+            continue;
+        if (i > 0) out << ",";
         out << steps[i].id << ":" << (steps[i].enabled ? 1 : 0);
-        if (!steps[i].settings.isEmpty()) {
-            out << ":" << QJsonDocument(QJsonObject::fromVariantMap(steps[i].settings)).toJson(QJsonDocument::Compact);
-        }
-        if (i < steps.size() - 1) out << ",";
     }
     out << "\n";
+
+    for (size_t i = 0; i < steps.size(); ++i) {
+        if (steps[i].id != "exposure" && steps[i].id != "laplacian" && steps[i].id != "aiaesthetic")
+            continue;
+        if (!steps[i].settings.isEmpty()) {
+            out << "pipeline_settings_" << steps[i].id << "="
+                << QJsonDocument(QJsonObject::fromVariantMap(steps[i].settings)).toJson(QJsonDocument::Compact)
+                << "\n";
+        }
+    }
 
     out << "preprocessors=";
     const auto& preSteps = m_preprocessorModel.getSteps();
+    bool first = true;
     for (size_t i = 0; i < preSteps.size(); ++i) {
+        if (preSteps[i].id != "visual_hash" && preSteps[i].id != "lut_3d") continue;
+        if (!first) out << ",";
+        first = false;
         out << preSteps[i].id << ":" << (preSteps[i].enabled ? 1 : 0);
-        if (!preSteps[i].settings.isEmpty()) {
-            out << ":" << QJsonDocument(QJsonObject::fromVariantMap(preSteps[i].settings)).toJson(QJsonDocument::Compact);
-        }
-        if (i < preSteps.size() - 1) out << ",";
     }
     out << "\n";
+
+    for (size_t i = 0; i < preSteps.size(); ++i) {
+        if (preSteps[i].id != "visual_hash" && preSteps[i].id != "lut_3d") continue;
+        if (!preSteps[i].settings.isEmpty()) {
+            out << "preprocessor_settings_" << preSteps[i].id << "="
+                << QJsonDocument(QJsonObject::fromVariantMap(preSteps[i].settings)).toJson(QJsonDocument::Compact)
+                << "\n";
+        }
+    }
 
     out << "postprocessors=";
     const auto& postSteps = m_postprocessorModel.getSteps();
+    first = true;
     for (size_t i = 0; i < postSteps.size(); ++i) {
+        if (postSteps[i].id != "clip_embedding") continue;
+        if (!first) out << ",";
+        first = false;
         out << postSteps[i].id << ":" << (postSteps[i].enabled ? 1 : 0);
-        if (!postSteps[i].settings.isEmpty()) {
-            out << ":" << QJsonDocument(QJsonObject::fromVariantMap(postSteps[i].settings)).toJson(QJsonDocument::Compact);
-        }
-        if (i < postSteps.size() - 1) out << ",";
     }
     out << "\n";
 
+    for (size_t i = 0; i < postSteps.size(); ++i) {
+        if (postSteps[i].id != "clip_embedding") continue;
+        if (!postSteps[i].settings.isEmpty()) {
+            out << "postprocessor_settings_" << postSteps[i].id << "="
+                << QJsonDocument(QJsonObject::fromVariantMap(postSteps[i].settings)).toJson(QJsonDocument::Compact)
+                << "\n";
+        }
+    }
+
     qf.close();
+}
+
+void AppBackend::syncAiSettingsFromModel() {
+    const auto& steps = m_pipelineModel.getSteps();
+    for (const auto& s : steps) {
+        if (s.id == "aiaesthetic") {
+            bool showScore = s.settings.contains("showScore") ? s.settings["showScore"].toBool() : true;
+            bool colorScore = s.settings.contains("colorScore") ? s.settings["colorScore"].toBool() : true;
+            bool applyUserBias = s.settings.contains("applyUserBias") ? s.settings["applyUserBias"].toBool() : true;
+
+            if (m_showAiScore != showScore) { m_showAiScore = showScore; emit showAiScoreChanged(); }
+            if (m_colorAiScore != colorScore) { m_colorAiScore = colorScore; emit colorAiScoreChanged(); }
+            if (m_applyUserBias != applyUserBias) { m_applyUserBias = applyUserBias; emit applyUserBiasChanged(); }
+            break;
+        }
+    }
+}
+
+void AppBackend::setShowAiScore(bool v) {
+    if (m_showAiScore != v) {
+        m_showAiScore = v;
+        const auto& steps = m_pipelineModel.getSteps();
+        for (int i = 0; i < static_cast<int>(steps.size()); ++i) {
+            if (steps[i].id == "aiaesthetic") {
+                auto s = steps[i].settings;
+                s["showScore"] = v;
+                m_pipelineModel.setStepSettings(i, s);
+                break;
+            }
+        }
+        saveSettings();
+        emit showAiScoreChanged();
+    }
+}
+
+void AppBackend::setColorAiScore(bool v) {
+    if (m_colorAiScore != v) {
+        m_colorAiScore = v;
+        const auto& steps = m_pipelineModel.getSteps();
+        for (int i = 0; i < static_cast<int>(steps.size()); ++i) {
+            if (steps[i].id == "aiaesthetic") {
+                auto s = steps[i].settings;
+                s["colorScore"] = v;
+                m_pipelineModel.setStepSettings(i, s);
+                break;
+            }
+        }
+        saveSettings();
+        emit colorAiScoreChanged();
+    }
+}
+
+void AppBackend::setApplyUserBias(bool v) {
+    if (m_applyUserBias != v) {
+        m_applyUserBias = v;
+        const auto& steps = m_pipelineModel.getSteps();
+        for (int i = 0; i < static_cast<int>(steps.size()); ++i) {
+            if (steps[i].id == "aiaesthetic") {
+                auto s = steps[i].settings;
+                s["applyUserBias"] = v;
+                m_pipelineModel.setStepSettings(i, s);
+                break;
+            }
+        }
+        saveSettings();
+        emit applyUserBiasChanged();
+    }
 }
 
 int AppBackend::themeMode() const { return m_themeMode; }

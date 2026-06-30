@@ -621,12 +621,73 @@ property bool isGridView: true
                 }
             }
 
+            // AI Aesthetic settings
+            ColumnLayout {
+                visible: stepSettingsPopup.stepId === "aiaesthetic"
+                spacing: 10
+                Layout.fillWidth: true
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+                    CheckBox {
+                        id: showScoreCheck
+                        checked: true
+                    }
+                    Text {
+                        text: "Show AI Score"
+                        color: textColor
+                        font.pixelSize: 13
+                        Layout.fillWidth: true
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+                    CheckBox {
+                        id: colorScoreCheck
+                        checked: true
+                    }
+                    Text {
+                        text: "Color AI Score"
+                        color: textColor
+                        font.pixelSize: 13
+                        Layout.fillWidth: true
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+                    CheckBox {
+                        id: applyBiasCheck
+                        checked: true
+                    }
+                    Text {
+                        text: "Apply User Bias"
+                        color: textColor
+                        font.pixelSize: 13
+                        Layout.fillWidth: true
+                    }
+                }
+
+                Text {
+                    text: "User bias adjusts the AI score based on your star rating history."
+                    color: isLight ? "#888" : "#aaa"
+                    font.pixelSize: 11
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+            }
+
             // Default empty state for steps without settings
             ColumnLayout {
                 visible: stepSettingsPopup.stepId !== "exposure"
                          && stepSettingsPopup.stepId !== "laplacian"
                          && stepSettingsPopup.stepId !== "visual_hash"
                          && stepSettingsPopup.stepId !== "clip_embedding"
+                         && stepSettingsPopup.stepId !== "aiaesthetic"
                 Layout.fillWidth: true
                 spacing: 10
                 Text {
@@ -661,6 +722,10 @@ property bool isGridView: true
                             settings["hammingThreshold"] = hashThresholdSlider.value
                         } else if (stepSettingsPopup.stepId === "clip_embedding") {
                             settings["cosineThreshold"] = clipThresholdSlider.value
+                        } else if (stepSettingsPopup.stepId === "aiaesthetic") {
+                            settings["showScore"] = showScoreCheck.checked
+                            settings["colorScore"] = colorScoreCheck.checked
+                            settings["applyUserBias"] = applyBiasCheck.checked
                         }
                         if (stepSettingsPopup.stepModel) {
                             stepSettingsPopup.stepModel.setStepSettings(
@@ -1231,11 +1296,16 @@ property bool isGridView: true
                                     stepSettingsPopup.stepModel = backend.preprocessorModel
                                     stepSettingsPopup.stepIndex = model.index
 
-                                    var s = model.settings || ({})
+                                    var s = stepSettingsPopup.stepModel.getStepSettings(stepSettingsPopup.stepIndex) || ({})
                                     if (model.id === "exposure") exposureSlider.value = s.clipThreshold !== undefined ? s.clipThreshold : 0.15
                                     if (model.id === "laplacian") laplacianSlider.value = s.focusThreshold !== undefined ? s.focusThreshold : 150.0
                                     if (model.id === "visual_hash") hashThresholdSlider.value = s.hammingThreshold !== undefined ? s.hammingThreshold : 20
                                     if (model.id === "clip_embedding") clipThresholdSlider.value = s.cosineThreshold !== undefined ? s.cosineThreshold : 0.90
+                                    if (model.id === "aiaesthetic") {
+                                        showScoreCheck.checked = s.showScore !== undefined ? s.showScore : true
+                                        colorScoreCheck.checked = s.colorScore !== undefined ? s.colorScore : true
+                                        applyBiasCheck.checked = s.applyUserBias !== undefined ? s.applyUserBias : true
+                                    }
 
                                     stepSettingsPopup.open()
                                 }
@@ -1351,9 +1421,14 @@ property bool isGridView: true
                                             stepSettingsPopup.stepModel = backend.pipelineModel
                                             stepSettingsPopup.stepIndex = model.index
 
-                                            var s = model.settings || ({})
+                                            var s = stepSettingsPopup.stepModel.getStepSettings(stepSettingsPopup.stepIndex) || ({})
                                             if (model.id === "exposure") exposureSlider.value = s.clipThreshold !== undefined ? s.clipThreshold : 0.15
                                             if (model.id === "laplacian") laplacianSlider.value = s.focusThreshold !== undefined ? s.focusThreshold : 150.0
+                                            if (model.id === "aiaesthetic") {
+                                                showScoreCheck.checked = s.showScore !== undefined ? s.showScore : true
+                                                colorScoreCheck.checked = s.colorScore !== undefined ? s.colorScore : true
+                                                applyBiasCheck.checked = s.applyUserBias !== undefined ? s.applyUserBias : true
+                                            }
 
                                             stepSettingsPopup.open()
                                         }
@@ -1484,11 +1559,16 @@ property bool isGridView: true
                                     stepSettingsPopup.stepModel = backend.postprocessorModel
                                     stepSettingsPopup.stepIndex = model.index
 
-                                    var s = model.settings || ({})
+                                    var s = stepSettingsPopup.stepModel.getStepSettings(stepSettingsPopup.stepIndex) || ({})
                                     if (model.id === "exposure") exposureSlider.value = s.clipThreshold !== undefined ? s.clipThreshold : 0.15
                                     if (model.id === "laplacian") laplacianSlider.value = s.focusThreshold !== undefined ? s.focusThreshold : 150.0
                                     if (model.id === "visual_hash") hashThresholdSlider.value = s.hammingThreshold !== undefined ? s.hammingThreshold : 20
                                     if (model.id === "clip_embedding") clipThresholdSlider.value = s.cosineThreshold !== undefined ? s.cosineThreshold : 0.90
+                                    if (model.id === "aiaesthetic") {
+                                        showScoreCheck.checked = s.showScore !== undefined ? s.showScore : true
+                                        colorScoreCheck.checked = s.colorScore !== undefined ? s.colorScore : true
+                                        applyBiasCheck.checked = s.applyUserBias !== undefined ? s.applyUserBias : true
+                                    }
 
                                     stepSettingsPopup.open()
                                 }
@@ -1995,9 +2075,10 @@ StyledButton {
                                     text: {
                                         if (model.status === "WAITING") return "Waiting...";
                                         if (model.isRejected) return "Rejected: " + model.rejectReason;
+                                        if (!backend.showAiScore) return "";
                                         return "Score: " + model.score;
                                     }
-                                    color: model.status === "WAITING" ? cardWaitingText : (model.isRejected ? cardBlurryText : getScoreColor(parseFloat(model.score)))
+                                    color: model.status === "WAITING" ? cardWaitingText : (model.isRejected ? cardBlurryText : (backend.colorAiScore ? getScoreColor(parseFloat(model.score)) : textColor))
                                     font.bold: true
                                     font.pixelSize: 12
                                 }
@@ -2166,9 +2247,10 @@ StyledButton {
                                     text: {
                                         if (model.status === "WAITING") return "Waiting...";
                                         if (model.isRejected) return "Rejected: " + model.rejectReason;
+                                        if (!backend.showAiScore) return "";
                                         return "Score: " + model.score;
                                     }
-                                    color: model.status === "WAITING" ? cardWaitingText : (model.isRejected ? cardBlurryText : getScoreColor(parseFloat(model.score)))
+                                    color: model.status === "WAITING" ? cardWaitingText : (model.isRejected ? cardBlurryText : (backend.colorAiScore ? getScoreColor(parseFloat(model.score)) : textColor))
                                     font.bold: true
                                     font.pixelSize: 14
                                     Layout.alignment: Qt.AlignRight

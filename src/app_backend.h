@@ -40,7 +40,7 @@ public:
         // Initialize with default tools
         m_steps.push_back({"exposure", "Exposure Check", true, {{"clipThreshold", 0.15}}});
         m_steps.push_back({"laplacian", "Laplacian Focus Check", true, {{"focusThreshold", 150.0}}});
-        m_steps.push_back({"aiaesthetic", "AI Aesthetic Scorer", true, {}});
+        m_steps.push_back({"aiaesthetic", "AI Aesthetic Scorer", true, {{"showScore", true}, {"colorScore", true}, {"applyUserBias", true}}});
     }
 
     void clear() {
@@ -68,7 +68,6 @@ public:
             case IdRole: return step.id;
             case NameRole: return step.name;
             case EnabledRole: return step.enabled;
-            case SettingsRole: return QVariant(step.settings);
             default: return QVariant();
         }
     }
@@ -91,8 +90,13 @@ public:
         roles[IdRole] = "id";
         roles[NameRole] = "name";
         roles[EnabledRole] = "enabled";
-        roles[SettingsRole] = "settings";
         return roles;
+    }
+
+    Q_INVOKABLE QVariantMap getStepSettings(int index) const {
+        if (index >= 0 && index < m_steps.size())
+            return m_steps[index].settings;
+        return {};
     }
 
     Q_INVOKABLE void setStepEnabled(int index, bool enabled) {
@@ -187,7 +191,6 @@ public:
             case NameRole:           return s.name;
             case EnabledRole:        return s.enabled;
             case SupportsDisableRole:return s.supportsDisable;
-            case SettingsRole:       return QVariant(s.settings);
             default:                 return QVariant();
         }
     }
@@ -208,8 +211,13 @@ public:
         roles[NameRole]            = "name";
         roles[EnabledRole]         = "enabled";
         roles[SupportsDisableRole] = "supportsDisable";
-        roles[SettingsRole]        = "settings";
         return roles;
+    }
+
+    Q_INVOKABLE QVariantMap getStepSettings(int index) const {
+        if (index >= 0 && index < static_cast<int>(m_steps.size()))
+            return m_steps[index].settings;
+        return {};
     }
 
     Q_INVOKABLE void setStepEnabled(int index, bool enabled) {
@@ -294,7 +302,6 @@ public:
             case NameRole:            return s.name;
             case EnabledRole:         return s.enabled;
             case SupportsDisableRole: return s.supportsDisable;
-            case SettingsRole:        return QVariant(s.settings);
             default:                  return QVariant();
         }
     }
@@ -315,8 +322,13 @@ public:
         roles[NameRole]            = "name";
         roles[EnabledRole]         = "enabled";
         roles[SupportsDisableRole] = "supportsDisable";
-        roles[SettingsRole]        = "settings";
         return roles;
+    }
+
+    Q_INVOKABLE QVariantMap getStepSettings(int index) const {
+        if (index >= 0 && index < static_cast<int>(m_steps.size()))
+            return m_steps[index].settings;
+        return {};
     }
 
     Q_INVOKABLE void setStepEnabled(int index, bool enabled) {
@@ -524,6 +536,11 @@ class AppBackend : public QObject {
     // External editor
     Q_PROPERTY(QString externalEditorPath READ externalEditorPath WRITE setExternalEditorPath NOTIFY externalEditorPathChanged)
 
+    // AI aesthetic display settings
+    Q_PROPERTY(bool showAiScore READ showAiScore WRITE setShowAiScore NOTIFY showAiScoreChanged)
+    Q_PROPERTY(bool colorAiScore READ colorAiScore WRITE setColorAiScore NOTIFY colorAiScoreChanged)
+    Q_PROPERTY(bool applyUserBias READ applyUserBias WRITE setApplyUserBias NOTIFY applyUserBiasChanged)
+
 public:
     explicit AppBackend(QObject *parent = nullptr);
     ~AppBackend();
@@ -596,6 +613,14 @@ public:
     Q_PROPERTY(PostprocessorConfigModel* postprocessorModel READ postprocessorModel CONSTANT)
     PostprocessorConfigModel* postprocessorModel() { return &m_postprocessorModel; }
 
+    // AI aesthetic display settings
+    bool showAiScore() const { return m_showAiScore; }
+    void setShowAiScore(bool v);
+    bool colorAiScore() const { return m_colorAiScore; }
+    void setColorAiScore(bool v);
+    bool applyUserBias() const { return m_applyUserBias; }
+    void setApplyUserBias(bool v);
+
     // Semaphore toggle: "visual_hash" | "clip_embedding" | "none"
     // Exactly one of the two grouping algorithms can be active at a time.
     Q_INVOKABLE void setGroupingMode(const QString& mode);
@@ -611,6 +636,10 @@ signals:
     void writeExifChanged();
     void rawViewModeChanged();
     void rawAnalysisModeChanged();
+
+    void showAiScoreChanged();
+    void colorAiScoreChanged();
+    void applyUserBiasChanged();
 
     void groupBurstsChanged();
 
@@ -695,6 +724,12 @@ private:
     void reloadViewerLut() const;
 
     PipelineRunner createPipeline();
+
+    // AI aesthetic display settings
+    bool m_showAiScore = true;
+    bool m_colorAiScore = true;
+    bool m_applyUserBias = true;
+    void syncAiSettingsFromModel();
 
     mutable std::mutex         m_metaMutex;    // guards m_ratings and m_colorLabels
     std::map<QString, int>     m_ratings;

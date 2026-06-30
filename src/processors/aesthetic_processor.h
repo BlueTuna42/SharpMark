@@ -8,10 +8,10 @@
 #include <mutex>
 #include <semaphore>
 #include <memory>
+#include <QVariantMap>
 
 class AestheticProcessor : public IImageProcessor {
 public:
-    // Initialize with paths to the 3 ONNX models
     AestheticProcessor(const std::filesystem::path& modelsDir, const std::filesystem::path& appDataDir);
     ~AestheticProcessor() override = default;
 
@@ -21,9 +21,22 @@ public:
     
     void process(std::unique_ptr<ImageBuffer>& image, const ProcessingContext& ctx, ProcessingResult& result) override;
 
-    // Active Learning: delta predicts the difference between User Rating and Base LAION score
     void train(const std::vector<float>& features, float baseScore, int userRating);
     static double evaluateClipVector(const std::filesystem::path& modelsDir, const std::filesystem::path& appDataDir, const std::vector<float>& clip_features);
+
+    QVariantMap settings() const override {
+        return {{"showScore", m_showScore}, {"colorScore", m_colorScore}, {"applyUserBias", m_applyUserBias}};
+    }
+
+    void setSettings(const QVariantMap& s) override {
+        if (s.contains("showScore")) m_showScore = s["showScore"].toBool();
+        if (s.contains("colorScore")) m_colorScore = s["colorScore"].toBool();
+        if (s.contains("applyUserBias")) m_applyUserBias = s["applyUserBias"].toBool();
+    }
+
+    bool showScore() const { return m_showScore; }
+    bool colorScore() const { return m_colorScore; }
+    bool applyUserBias() const { return m_applyUserBias; }
 
 private:
     // ONNX Runtime State
@@ -60,4 +73,9 @@ private:
     
     // ONNX Execution Helper
     std::vector<Ort::Value> runOnnxModel(Ort::Session& session, std::vector<float>& inputTensor, const std::vector<int64_t>& dims);
+
+    // Per-instance settings
+    bool m_showScore = true;
+    bool m_colorScore = true;
+    bool m_applyUserBias = true;
 };

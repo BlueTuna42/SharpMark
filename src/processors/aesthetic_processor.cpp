@@ -252,16 +252,21 @@ void AestheticProcessor::process(std::unique_ptr<ImageBuffer>& image, const Proc
         
         qDebug() << "[AI] Semaphore released. Applying user delta...";
 
-        float userDelta = user_bias_;
-        {
-            std::lock_guard<std::mutex> lock(weights_mtx_);
-            for (size_t i = 0; i < 512; ++i) {
-                userDelta += clip_features[i] * user_weights_[i];
+        float finalScore;
+        if (m_applyUserBias) {
+            float userDelta = user_bias_;
+            {
+                std::lock_guard<std::mutex> lock(weights_mtx_);
+                for (size_t i = 0; i < 512; ++i) {
+                    userDelta += clip_features[i] * user_weights_[i];
+                }
             }
+            finalScore = baseAestheticScore + userDelta;
+            qDebug() << "[AI] Final Score:" << finalScore << "(Base:" << baseAestheticScore << "UserDelta:" << userDelta << ")";
+        } else {
+            finalScore = baseAestheticScore;
+            qDebug() << "[AI] Final Score:" << finalScore << "(user bias disabled)";
         }
-
-        float finalScore = baseAestheticScore + userDelta;
-        qDebug() << "[AI] Final Score:" << finalScore << "(Base:" << baseAestheticScore << "UserDelta:" << userDelta << ")";
 
         result.metrics.push_back({"aesthetic_score", static_cast<double>(finalScore)});
         result.metrics.push_back({"aesthetic_base_score", static_cast<double>(baseAestheticScore)});
