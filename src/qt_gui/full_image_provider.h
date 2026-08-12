@@ -3,6 +3,8 @@
 #include <QQuickImageProvider>
 #include <QImage>
 #include <QImageReader>
+#include <QBuffer>
+#include <QTransform>
 #include <QString>
 #include <QUrl>
 #include <QFileInfo>
@@ -124,11 +126,30 @@ private:
                 QImage thumb;
                 if (lr.imgdata.thumbnail.tformat == LIBRAW_THUMBNAIL_JPEG) {
                     qDebug() << "[LibRaw] Extracted JPEG thumbnail successfully.";
-                    thumb.loadFromData(
-                        reinterpret_cast<const uchar*>(lr.imgdata.thumbnail.thumb),
-                        lr.imgdata.thumbnail.tlength,
-                        "JPEG"
+                    QByteArray thumbData(
+                        reinterpret_cast<const char*>(lr.imgdata.thumbnail.thumb),
+                        lr.imgdata.thumbnail.tlength
                     );
+                    QBuffer buffer(&thumbData);
+                    buffer.open(QIODevice::ReadOnly);
+                    QImageReader reader(&buffer);
+                    reader.setAutoTransform(true);
+                    thumb = reader.read();
+
+                    int flip = lr.imgdata.sizes.flip;
+                    if (!thumb.isNull() && flip != 0) {
+                        if ((flip == 5 || flip == 6 || flip == 8) && thumb.width() >= thumb.height()) {
+                            QTransform t;
+                            if (flip == 6) t.rotate(90);
+                            else if (flip == 5 || flip == 8) t.rotate(270);
+                            thumb = thumb.transformed(t, Qt::SmoothTransformation);
+                        } else if (flip == 3 && thumb.width() >= thumb.height()) {
+                            QTransform t;
+                            t.rotate(180);
+                            thumb = thumb.transformed(t, Qt::SmoothTransformation);
+                        }
+                    }
+
                     lr.recycle();
                     return thumb;
                 } else {

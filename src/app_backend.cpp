@@ -404,6 +404,7 @@ QVariantMap AppBackend::getPhotoMetadata(const QString& rawPath) {
 
     // 2. Fast Path: Use Qt's built-in image reader for standard formats (JPG, PNG)
     QImageReader reader(cleanPath);
+    reader.setAutoTransform(true);
     QSize imgSize = reader.size();
     
     if (imgSize.isValid()) {

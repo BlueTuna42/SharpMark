@@ -1000,6 +1000,7 @@ property bool isGridView: true
                         height: flickable.height
                         fillMode: Image.PreserveAspectFit
                         asynchronous: true
+                        autoTransform: true
                         cache: false
                         transformOrigin: Item.TopLeft
                         smooth: true
@@ -2054,13 +2055,8 @@ StyledButton {
                                     Layout.preferredHeight: 160
                                     source: "image://preview/" + model.filePath
                                     asynchronous: true
+                                    autoTransform: true
                                     fillMode: Image.PreserveAspectFit
-
-                                    Rectangle {
-                                        anchors.fill: parent
-                                        color: "black"
-                                        z: -1
-                                    }
                                 }
 
                                 Text {
@@ -2226,13 +2222,8 @@ StyledButton {
                                     Layout.preferredHeight: 50
                                     source: "image://preview/" + model.filePath
                                     asynchronous: true
+                                    autoTransform: true
                                     fillMode: Image.PreserveAspectFit
-
-                                    Rectangle {
-                                        anchors.fill: parent
-                                        color: "black"
-                                        z: -1
-                                    }
                                 }
 
                                 Text {

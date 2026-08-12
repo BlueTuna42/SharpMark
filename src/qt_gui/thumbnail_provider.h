@@ -3,6 +3,8 @@
 #include <QQuickImageProvider>
 #include <QImage>
 #include <QImageReader>
+#include <QBuffer>
+#include <QTransform>
 #include <QString>
 #include <QFileInfo>
 #include <QUrl>
@@ -34,9 +36,9 @@ public:
 
         const int targetWidth = 256;
         const int targetHeight = 256;
-        if (size) *size = QSize(targetWidth, targetHeight);
 
         if (!QFileInfo::exists(filePath)) {
+            if (size) *size = QSize(targetWidth, targetHeight);
             return createBlackImage(targetWidth, targetHeight);
         }
 
@@ -45,18 +47,28 @@ public:
 
         if (isRawExtension(suffix)) {
             resultImage = extractRawThumbnail(filePath);
+            if (!resultImage.isNull() && (resultImage.width() > targetWidth || resultImage.height() > targetHeight)) {
+                resultImage = resultImage.scaled(targetWidth, targetHeight, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            }
         } else {
             QImageReader reader(filePath);
             if (reader.canRead()) {
-                reader.setScaledSize(QSize(targetWidth, targetHeight));
+                reader.setAutoTransform(true);
+                QSize origSize = reader.size();
+                if (origSize.isValid()) {
+                    QSize scaledSize = origSize.scaled(targetWidth, targetHeight, Qt::KeepAspectRatio);
+                    reader.setScaledSize(scaledSize);
+                }
                 resultImage = reader.read();
             }
         }
 
         if (resultImage.isNull()) {
+            if (size) *size = QSize(targetWidth, targetHeight);
             return createBlackImage(targetWidth, targetHeight);
         }
 
+        if (size) *size = resultImage.size();
         return resultImage;
     }
 
@@ -93,11 +105,15 @@ private:
         QImage thumbnail;
         
         if (rawProcessor.imgdata.thumbnail.tformat == LIBRAW_THUMBNAIL_JPEG) {
-            thumbnail.loadFromData(
-                reinterpret_cast<const uchar*>(rawProcessor.imgdata.thumbnail.thumb), 
-                rawProcessor.imgdata.thumbnail.tlength, 
-                "JPEG"
+            QByteArray thumbData(
+                reinterpret_cast<const char*>(rawProcessor.imgdata.thumbnail.thumb),
+                rawProcessor.imgdata.thumbnail.tlength
             );
+            QBuffer buffer(&thumbData);
+            buffer.open(QIODevice::ReadOnly);
+            QImageReader reader(&buffer);
+            reader.setAutoTransform(true);
+            thumbnail = reader.read();
         } 
         else if (rawProcessor.imgdata.thumbnail.tformat == LIBRAW_THUMBNAIL_BITMAP) {
             thumbnail = QImage(
@@ -106,6 +122,20 @@ private:
                 rawProcessor.imgdata.thumbnail.theight,
                 QImage::Format_RGB888
             ).copy();
+        }
+
+        int flip = rawProcessor.imgdata.sizes.flip;
+        if (!thumbnail.isNull() && flip != 0) {
+            if ((flip == 5 || flip == 6 || flip == 8) && thumbnail.width() >= thumbnail.height()) {
+                QTransform t;
+                if (flip == 6) t.rotate(90);
+                else if (flip == 5 || flip == 8) t.rotate(270);
+                thumbnail = thumbnail.transformed(t, Qt::SmoothTransformation);
+            } else if (flip == 3 && thumbnail.width() >= thumbnail.height()) {
+                QTransform t;
+                t.rotate(180);
+                thumbnail = thumbnail.transformed(t, Qt::SmoothTransformation);
+            }
         }
 
         rawProcessor.recycle();
