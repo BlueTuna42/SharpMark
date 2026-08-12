@@ -1823,59 +1823,141 @@ StyledButton {
                 }
             }
 
-            // --- COLOR LABEL FILTER ROW ---
+            // --- COLOR LABEL & RATING FILTER ROW ---
             RowLayout {
                 Layout.fillWidth: true
-                spacing: 6
+                spacing: 12
 
-                Text {
-                    text: "Label:"
-                    color: isLight ? "#666" : "#aaa"
-                    font.pixelSize: 13
-                    Layout.alignment: Qt.AlignVCenter
-                }
+                // --- COLOR LABEL FILTER ---
+                RowLayout {
+                    spacing: 6
 
-                // "All" button
-                Rectangle {
-                    width: 36; height: 24; radius: 4
-                    color: backend.burstProxy.colorLabelFilter === "" ? (isLight ? "#0066cc" : "#3a80d2") : (isLight ? "#e0e0e0" : "#2a2a2a")
-                    border.color: isLight ? "#ccc" : "#444"
-                    Layout.alignment: Qt.AlignVCenter
                     Text {
-                        anchors.centerIn: parent
-                        text: "All"
-                        color: backend.burstProxy.colorLabelFilter === "" ? "white" : (isLight ? "#333" : "#aaa")
-                        font.pixelSize: 12
+                        text: "Label:"
+                        color: isLight ? "#666" : "#aaa"
+                        font.pixelSize: 13
+                        font.bold: true
+                        Layout.alignment: Qt.AlignVCenter
                     }
-                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: backend.burstProxy.colorLabelFilter = "" }
+
+                    // "All" button
+                    Rectangle {
+                        width: 36; height: 24; radius: 4
+                        color: backend.burstProxy.colorLabelFilter === "" ? (isLight ? "#0066cc" : "#3a80d2") : (isLight ? "#e0e0e0" : "#2a2a2a")
+                        border.color: isLight ? "#ccc" : "#444"
+                        Layout.alignment: Qt.AlignVCenter
+                        Text {
+                            anchors.centerIn: parent
+                            text: "All"
+                            color: backend.burstProxy.colorLabelFilter === "" ? "white" : (isLight ? "#333" : "#aaa")
+                            font.pixelSize: 12
+                        }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: backend.burstProxy.colorLabelFilter = "" }
+                    }
+
+                    // Colored dot buttons
+                    Repeater {
+                        model: [
+                            { label: "Red",    color: "#e05050" },
+                            { label: "Yellow", color: "#d4b800" },
+                            { label: "Green",  color: "#3caa3c" },
+                            { label: "Blue",   color: "#3a80d2" },
+                            { label: "Purple", color: "#9b59b6" }
+                        ]
+                        delegate: Rectangle {
+                            property bool active: backend.burstProxy.colorLabelFilter === modelData.label
+                            width: 24; height: 24; radius: 12
+                            color: modelData.color
+                            border.color: active ? "white" : "transparent"
+                            border.width: active ? 2 : 0
+                            opacity: active ? 1.0 : 0.55
+                            Layout.alignment: Qt.AlignVCenter
+                            ToolTip.visible: hoverArea.containsMouse
+                            ToolTip.text: modelData.label
+                            MouseArea {
+                                id: hoverArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: backend.burstProxy.colorLabelFilter =
+                                    parent.active ? "" : modelData.label
+                            }
+                        }
+                    }
                 }
 
-                // Colored dot buttons
-                Repeater {
-                    model: [
-                        { label: "Red",    color: "#e05050" },
-                        { label: "Yellow", color: "#d4b800" },
-                        { label: "Green",  color: "#3caa3c" },
-                        { label: "Blue",   color: "#3a80d2" },
-                        { label: "Purple", color: "#9b59b6" }
-                    ]
-                    delegate: Rectangle {
-                        property bool active: backend.burstProxy.colorLabelFilter === modelData.label
-                        width: 24; height: 24; radius: 12
-                        color: modelData.color
-                        border.color: active ? "white" : "transparent"
-                        border.width: active ? 2 : 0
-                        opacity: active ? 1.0 : 0.55
+                // Vertical Divider
+                Rectangle {
+                    width: 1
+                    height: 18
+                    color: popupBorder
+                    Layout.alignment: Qt.AlignVCenter
+                }
+
+                // --- RATING FILTER ---
+                RowLayout {
+                    spacing: 4
+
+                    Text {
+                        text: "Rating:"
+                        color: isLight ? "#666" : "#aaa"
+                        font.pixelSize: 13
+                        font.bold: true
                         Layout.alignment: Qt.AlignVCenter
-                        ToolTip.visible: hoverArea.containsMouse
-                        ToolTip.text: modelData.label
-                        MouseArea {
-                            id: hoverArea
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: backend.burstProxy.colorLabelFilter =
-                                parent.active ? "" : modelData.label
+                    }
+
+                    // "All" button for rating
+                    Rectangle {
+                        width: 36; height: 24; radius: 4
+                        color: backend.burstProxy.ratingFilter === 0 ? (isLight ? "#0066cc" : "#3a80d2") : (isLight ? "#e0e0e0" : "#2a2a2a")
+                        border.color: isLight ? "#ccc" : "#444"
+                        Layout.alignment: Qt.AlignVCenter
+                        Text {
+                            anchors.centerIn: parent
+                            text: "All"
+                            color: backend.burstProxy.ratingFilter === 0 ? "white" : (isLight ? "#333" : "#aaa")
+                            font.pixelSize: 12
+                        }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: backend.burstProxy.ratingFilter = 0 }
+                    }
+
+                    // Star rating buttons (1★..5★)
+                    Repeater {
+                        model: [1, 2, 3, 4, 5]
+                        delegate: Rectangle {
+                            property bool active: backend.burstProxy.ratingFilter === modelData
+                            width: 32; height: 24; radius: 4
+                            color: active ? (isLight ? "#0066cc" : "#3a80d2") : (isLight ? "#e0e0e0" : "#2a2a2a")
+                            border.color: active ? "white" : (isLight ? "#ccc" : "#444")
+                            border.width: active ? 1 : 0
+                            Layout.alignment: Qt.AlignVCenter
+
+                            Row {
+                                anchors.centerIn: parent
+                                spacing: 2
+                                Text {
+                                    text: modelData
+                                    color: active ? "white" : (isLight ? "#333" : "#ccc")
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                }
+                                Text {
+                                    text: "★"
+                                    color: "#ffffff"
+                                    font.pixelSize: 11
+                                }
+                            }
+
+                            ToolTip.visible: starArea.containsMouse
+                            ToolTip.text: modelData + " Star" + (modelData > 1 ? "s" : "")
+                            MouseArea {
+                                id: starArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: backend.burstProxy.ratingFilter =
+                                    parent.active ? 0 : modelData
+                            }
                         }
                     }
                 }

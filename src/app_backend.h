@@ -367,6 +367,7 @@ class BurstFilterProxyModel : public QSortFilterProxyModel {
     Q_PROPERTY(int count READ count NOTIFY countChanged)
     Q_PROPERTY(SortMode sortMode READ sortMode WRITE setSortMode NOTIFY sortModeChanged)
     Q_PROPERTY(QString colorLabelFilter READ colorLabelFilter WRITE setColorLabelFilter NOTIFY colorLabelFilterChanged)
+    Q_PROPERTY(int ratingFilter READ ratingFilter WRITE setRatingFilter NOTIFY ratingFilterChanged)
 
 public:
     enum SortMode {
@@ -453,6 +454,16 @@ public:
         }
     }
 
+    int ratingFilter() const { return m_ratingFilter; }
+    void setRatingFilter(int rating) {
+        if (m_ratingFilter != rating) {
+            m_ratingFilter = rating;
+            invalidateFilter();
+            emit ratingFilterChanged();
+            emit countChanged();
+        }
+    }
+
 protected:
     bool filterAcceptsRow(int source_row, const QModelIndex& source_parent) const override {
         QModelIndex idx = sourceModel()->index(source_row, 0, source_parent);
@@ -464,6 +475,15 @@ protected:
                                ? sourceModel()->data(idx, m_colorLabelRole).toString()
                                : QString();
             if (rowLabel != m_colorLabelFilter) return false;
+        }
+
+        // ── Rating filter ────────────────────────────────────────────────────
+        if (m_ratingFilter > 0) {
+            if (m_ratingRole == -1) m_ratingRole = roleNames().key("rating", -1);
+            int rowRating = (m_ratingRole != -1)
+                            ? sourceModel()->data(idx, m_ratingRole).toInt()
+                            : 0;
+            if (rowRating != m_ratingFilter) return false;
         }
 
         // ── Burst group filter ───────────────────────────────────────────────
@@ -554,6 +574,7 @@ signals:
     void countChanged();
     void sortModeChanged();
     void colorLabelFilterChanged();
+    void ratingFilterChanged();
 
 private:
     QObject* m_source = nullptr;
@@ -564,6 +585,7 @@ private:
     mutable int m_scoreRole = -1;
     mutable int m_ratingRole = -1;
     QString m_colorLabelFilter;               // "" = show all
+    int m_ratingFilter = 0;                   // 0 = show all
     mutable int m_colorLabelRole = -1;
 };
 
