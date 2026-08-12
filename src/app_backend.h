@@ -372,7 +372,10 @@ public:
     enum SortMode {
         SortDefault = 0,
         SortBestFirst,
-        SortWorstFirst
+        SortWorstFirst,
+        SortRatingHigh,
+        SortRatingLow,
+        SortColorLabel
     };
     Q_ENUM(SortMode)
 
@@ -429,7 +432,13 @@ public:
     void setSortMode(SortMode mode) {
         if (m_sortMode != mode) {
             m_sortMode = mode;
-            sort(0, m_sortMode == SortBestFirst ? Qt::DescendingOrder : Qt::AscendingOrder);
+            Qt::SortOrder order = Qt::AscendingOrder;
+            if (m_sortMode == SortBestFirst || m_sortMode == SortRatingHigh) {
+                order = Qt::DescendingOrder;
+            } else {
+                order = Qt::AscendingOrder;
+            }
+            sort(0, order);
             emit sortModeChanged();
         }
     }
@@ -474,21 +483,69 @@ protected:
             return source_left.row() < source_right.row();
         }
 
-        if (m_scoreRole == -1) m_scoreRole = roleNames().key("score", -1);
-        
-        float scoreL = 0.0f;
-        float scoreR = 0.0f;
-
-        if (m_scoreRole != -1) {
-            scoreL = sourceModel()->data(source_left, m_scoreRole).toFloat();
-            scoreR = sourceModel()->data(source_right, m_scoreRole).toFloat();
+        if (m_sortMode == SortBestFirst || m_sortMode == SortWorstFirst) {
+            if (m_scoreRole == -1) m_scoreRole = roleNames().key("score", -1);
+            float scoreL = 0.0f;
+            float scoreR = 0.0f;
+            if (m_scoreRole != -1) {
+                scoreL = sourceModel()->data(source_left, m_scoreRole).toFloat();
+                scoreR = sourceModel()->data(source_right, m_scoreRole).toFloat();
+            }
+            if (qFuzzyCompare(scoreL, scoreR)) {
+                return source_left.row() < source_right.row();
+            }
+            return scoreL < scoreR;
         }
 
-        if (qFuzzyCompare(scoreL, scoreR)) {
+        if (m_sortMode == SortRatingHigh || m_sortMode == SortRatingLow) {
+            if (m_ratingRole == -1) m_ratingRole = roleNames().key("rating", -1);
+            int ratingL = 0;
+            int ratingR = 0;
+            if (m_ratingRole != -1) {
+                ratingL = sourceModel()->data(source_left, m_ratingRole).toInt();
+                ratingR = sourceModel()->data(source_right, m_ratingRole).toInt();
+            }
+            if (ratingL != ratingR) {
+                return ratingL < ratingR;
+            }
+            if (m_scoreRole == -1) m_scoreRole = roleNames().key("score", -1);
+            float scoreL = (m_scoreRole != -1) ? sourceModel()->data(source_left, m_scoreRole).toFloat() : 0.0f;
+            float scoreR = (m_scoreRole != -1) ? sourceModel()->data(source_right, m_scoreRole).toFloat() : 0.0f;
+            if (!qFuzzyCompare(scoreL, scoreR)) {
+                return scoreL < scoreR;
+            }
             return source_left.row() < source_right.row();
         }
 
-        return scoreL < scoreR;
+        if (m_sortMode == SortColorLabel) {
+            if (m_colorLabelRole == -1) m_colorLabelRole = roleNames().key("colorLabel", -1);
+            QString labelL = (m_colorLabelRole != -1) ? sourceModel()->data(source_left, m_colorLabelRole).toString() : QString();
+            QString labelR = (m_colorLabelRole != -1) ? sourceModel()->data(source_right, m_colorLabelRole).toString() : QString();
+
+            auto colorRank = [](const QString& lbl) -> int {
+                if (lbl == "Red")    return 1;
+                if (lbl == "Yellow") return 2;
+                if (lbl == "Green")  return 3;
+                if (lbl == "Blue")   return 4;
+                if (lbl == "Purple") return 5;
+                return 6;
+            };
+
+            int rankL = colorRank(labelL);
+            int rankR = colorRank(labelR);
+            if (rankL != rankR) {
+                return rankL < rankR;
+            }
+            if (m_ratingRole == -1) m_ratingRole = roleNames().key("rating", -1);
+            int ratingL = (m_ratingRole != -1) ? sourceModel()->data(source_left, m_ratingRole).toInt() : 0;
+            int ratingR = (m_ratingRole != -1) ? sourceModel()->data(source_right, m_ratingRole).toInt() : 0;
+            if (ratingL != ratingR) {
+                return ratingL > ratingR;
+            }
+            return source_left.row() < source_right.row();
+        }
+
+        return source_left.row() < source_right.row();
     }
 
 signals:
@@ -505,6 +562,7 @@ private:
     mutable int m_isExpandedRole = -1;
     SortMode m_sortMode = SortDefault;
     mutable int m_scoreRole = -1;
+    mutable int m_ratingRole = -1;
     QString m_colorLabelFilter;               // "" = show all
     mutable int m_colorLabelRole = -1;
 };
@@ -656,6 +714,7 @@ signals:
     void bestShotAssigned(int index, bool isBestShot, int leadIndex);
     // Emitted after setPhotoColorLabel so QML can update grid badges live
     void colorLabelChanged(const QString& filePath, const QString& label);
+    void photoRatingChanged(const QString& filePath, int rating);
     // Emitted from background thread after XMP is read for a file on folder open
     void fileMetadataLoaded(int index, int rating, const QString& colorLabel);
 

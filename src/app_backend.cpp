@@ -760,6 +760,7 @@ void AppBackend::setPhotoRating(const QString& rawPath, int rating, float baseSc
 
     { std::lock_guard<std::mutex> lk(m_metaMutex); m_ratings[cleanPath] = rating; }
     saveRatings();
+    emit photoRatingChanged(cleanPath, rating);
 
     {
         QString exiftoolPath = QCoreApplication::applicationDirPath() + "/exiftool";
@@ -1346,56 +1347,80 @@ void AppBackend::selectFolder(const QString &folderPath) {
         static const QStringList rawExts = {"cr2","cr3","nef","arw","dng","raf","orf","rw2","pef","srw"};
         for (int i = 0; i < static_cast<int>(filesCopy.size()); ++i) {
             const QString& path = filesCopy[i];
-            // Determine which file to scan (sidecar for RAW, self otherwise)
             QFileInfo fi(path);
-            QString fileToRead = path;
+            
+            // Check sidecar first if RAW, or fallback to file itself
+            QStringList candidateFiles;
             if (rawExts.contains(fi.suffix().toLower())) {
                 QString sc = fi.absolutePath() + "/" + fi.completeBaseName() + ".xmp";
-                if (QFileInfo::exists(sc)) fileToRead = sc;
+                if (QFileInfo::exists(sc)) candidateFiles << sc;
             }
+            candidateFiles << path;
 
-            // --- Read rating ---
             int rating = 0;
+            QString colorLabel;
+
+            for (const QString& fileToRead : candidateFiles) {
 #ifdef Q_OS_WIN
-            std::ifstream rf(fileToRead.toStdWString(), std::ios::binary);
+                std::ifstream rf(fileToRead.toStdWString(), std::ios::binary);
 #else
-            std::ifstream rf(fileToRead.toUtf8().constData(), std::ios::binary);
+                std::ifstream rf(fileToRead.toUtf8().constData(), std::ios::binary);
 #endif
-            std::string buf;
-            if (rf.is_open()) {
-                buf.resize(1024 * 1024);
+                if (!rf.is_open()) continue;
+
+                std::string buf;
+                buf.resize(2048 * 1024);
                 rf.read(&buf[0], buf.size());
                 buf.resize(rf.gcount());
+                if (buf.empty()) continue;
 
-                static const std::vector<std::pair<std::string,int>> rpatterns = {
-                    {"xmp:Rating>", 11}, {"xmp:Rating=\"", 12}, {"<Rating>", 8}, {" Rating=\"", 9}
-                };
-                for (const auto& [pat, off] : rpatterns) {
-                    size_t pos = buf.find(pat);
-                    if (pos != std::string::npos && pos + off < buf.size()) {
-                        char v = buf[pos + off];
-                        if (isdigit(v)) { rating = v - '0'; break; }
+                // --- Read rating ---
+                if (rating == 0) {
+                    static const std::vector<std::pair<std::string,int>> rpatterns = {
+                        {"xmp:Rating>", 11}, {"<xmp:Rating>", 12}, {"xmp:Rating=\"", 12},
+                        {"xmp:Rating='", 12}, {"<Rating>", 8}, {" Rating=\"", 9}, {" Rating='", 9},
+                        {"Rating>", 7}, {"exif:Rating>", 12}, {"<exif:Rating>", 13}
+                    };
+                    for (const auto& [pat, off] : rpatterns) {
+                        size_t pos = buf.find(pat);
+                        if (pos != std::string::npos && pos + off < buf.size()) {
+                            char v = buf[pos + off];
+                            if (isdigit(v)) { rating = v - '0'; break; }
+                        }
                     }
                 }
-            }
 
-            // --- Read color label (reuse buf already loaded) ---
-            QString colorLabel;
-            if (!buf.empty()) {
-                static const std::vector<std::pair<std::string,std::string>> lpatterns = {
-                    {"xmp:Label=\"", "\""}, {"<xmp:Label>", "</xmp:Label>"}, {"xmp:Label='", "'"}
-                };
-                for (const auto& [open, close] : lpatterns) {
-                    size_t pos = buf.find(open);
-                    if (pos == std::string::npos) continue;
-                    size_t start = pos + open.size();
-                    size_t end   = buf.find(close, start);
-                    if (end == std::string::npos || end - start > 32) continue;
-                    std::string val = buf.substr(start, end - start);
-                    while (!val.empty() && (val.front()==' '||val.front()=='\n'||val.front()=='\r')) val.erase(val.begin());
-                    while (!val.empty() && (val.back() ==' '||val.back() =='\n'||val.back() =='\r')) val.pop_back();
-                    if (!val.empty()) { colorLabel = QString::fromStdString(val); break; }
+                // --- Read color label ---
+                if (colorLabel.isEmpty()) {
+                    static const std::vector<std::pair<std::string,std::string>> lpatterns = {
+                        {"xmp:Label=\"", "\""}, {"<xmp:Label>", "</xmp:Label>"}, {"xmp:Label='", "'"},
+                        {"<Label>", "</Label>"}, {"Label=\"", "\""}, {"Label='", "'"}
+                    };
+                    for (const auto& [open, close] : lpatterns) {
+                        size_t pos = buf.find(open);
+                        if (pos == std::string::npos) continue;
+                        size_t start = pos + open.size();
+                        size_t end   = buf.find(close, start);
+                        if (end == std::string::npos || end - start > 32) continue;
+                        std::string val = buf.substr(start, end - start);
+                        while (!val.empty() && (val.front()==' '||val.front()=='\n'||val.front()=='\r')) val.erase(val.begin());
+                        while (!val.empty() && (val.back() ==' '||val.back() =='\n'||val.back() =='\r')) val.pop_back();
+                        if (!val.empty()) { colorLabel = QString::fromStdString(val); break; }
+                    }
+                    if (colorLabel.isEmpty()) {
+                        size_t upos = buf.find("<photoshop:Urgency>");
+                        if (upos != std::string::npos && upos + 19 < buf.size()) {
+                            char uval = buf[upos + 19];
+                            if (uval == '1') colorLabel = "Red";
+                            else if (uval == '2') colorLabel = "Yellow";
+                            else if (uval == '3') colorLabel = "Green";
+                            else if (uval == '4') colorLabel = "Blue";
+                            else if (uval == '5') colorLabel = "Purple";
+                        }
+                    }
                 }
+
+                if (rating > 0 && !colorLabel.isEmpty()) break;
             }
 
             // Cache in-memory so getPhotoRating/getPhotoColorLabel return instantly
@@ -1405,8 +1430,7 @@ void AppBackend::selectFolder(const QString &folderPath) {
                 m_colorLabels[path] = colorLabel;
             }
 
-            if (rating > 0 || !colorLabel.isEmpty())
-                emit fileMetadataLoaded(i, rating, colorLabel);
+            emit fileMetadataLoaded(i, rating, colorLabel);
         }
     });
 }

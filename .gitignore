@@ -84,3 +84,4 @@ Images
 *.onnx
 *onnxruntime
 models/
+*AGENTS.md

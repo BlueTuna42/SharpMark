@@ -394,8 +394,8 @@ property bool isGridView: true
 
         function onFileMetadataLoaded(index, rating, colorLabel) {
             if (index >= 0 && index < resultsModel.count) {
-                if (rating > 0)        resultsModel.setProperty(index, "rating", rating)
-                if (colorLabel !== "") resultsModel.setProperty(index, "colorLabel", colorLabel)
+                resultsModel.setProperty(index, "rating", rating)
+                resultsModel.setProperty(index, "colorLabel", colorLabel)
             }
         }
 
@@ -425,6 +425,15 @@ property bool isGridView: true
             for (let i = 0; i < resultsModel.count; i++) {
                 if (resultsModel.get(i).filePath === filePath) {
                     resultsModel.setProperty(i, "colorLabel", label)
+                    break
+                }
+            }
+        }
+
+        function onPhotoRatingChanged(filePath, rating) {
+            for (let i = 0; i < resultsModel.count; i++) {
+                if (resultsModel.get(i).filePath === filePath) {
+                    resultsModel.setProperty(i, "rating", rating)
                     break
                 }
             }
@@ -1753,8 +1762,8 @@ StyledButton {
 
                 StyledComboBox {
                     Layout.fillWidth: true
-                    Layout.minimumWidth: 60
-                    model: ["Default", "Best First", "Worst First"]
+                    Layout.minimumWidth: 140
+                    model: ["Default", "Best First", "Worst First", "Rating (High → Low)", "Rating (Low → High)", "Color Rating"]
                     currentIndex: backend.burstProxy.sortMode
                     onActivated: backend.burstProxy.sortMode = currentIndex
                 }
@@ -2052,11 +2061,50 @@ StyledButton {
 
                                 Image {
                                     Layout.fillWidth: true
-                                    Layout.preferredHeight: 160
+                                    Layout.preferredHeight: 150
                                     source: "image://preview/" + model.filePath
                                     asynchronous: true
                                     autoTransform: true
                                     fillMode: Image.PreserveAspectFit
+                                }
+
+                                // STAR RATING & COLOR LABEL CONTAINER — drawn directly under preview
+                                Item {
+                                    visible: model.rating > 0 || model.colorLabel !== ""
+                                    Layout.alignment: Qt.AlignHCenter
+                                    implicitWidth: pillBox.width
+                                    implicitHeight: pillBox.height
+
+                                    Rectangle {
+                                        id: pillBox
+                                        anchors.centerIn: parent
+                                        width: {
+                                            if (model.colorLabel !== "") {
+                                                return model.rating > 0 ? (starsText.implicitWidth + 12) : 24
+                                            }
+                                            return starsText.implicitWidth
+                                        }
+                                        height: model.colorLabel !== "" ? (model.rating > 0 ? 18 : 12) : 16
+                                        radius: height / 2
+                                        color: {
+                                            if (model.colorLabel === "Red")    return "#e05050"
+                                            if (model.colorLabel === "Yellow") return "#d4b800"
+                                            if (model.colorLabel === "Green")  return "#3caa3c"
+                                            if (model.colorLabel === "Blue")   return "#3a80d2"
+                                            if (model.colorLabel === "Purple") return "#9b59b6"
+                                            return "transparent"
+                                        }
+
+                                        Text {
+                                            id: starsText
+                                            visible: model.rating > 0
+                                            anchors.centerIn: parent
+                                            text: "★".repeat(model.rating)
+                                            color: "#ffffff"
+                                            font.pixelSize: 11
+                                            font.bold: true
+                                        }
+                                    }
                                 }
 
                                 Text {
@@ -2080,25 +2128,9 @@ StyledButton {
                                 }
                             }
 
-                            // COLOR LABEL BOOKMARK — left edge of card
-                            Rectangle {
-                                visible: model.colorLabel !== ""
-                                anchors.left: parent.left
-                                anchors.top: parent.top
-                                anchors.topMargin: 24
-                                width: 6
-                                height: 36
-                                radius: 3
-                                color: {
-                                    if (model.colorLabel === "Red")    return "#e05050"
-                                    if (model.colorLabel === "Yellow") return "#d4b800"
-                                    if (model.colorLabel === "Green")  return "#3caa3c"
-                                    if (model.colorLabel === "Blue")   return "#3a80d2"
-                                    if (model.colorLabel === "Purple") return "#9b59b6"
-                                    return "transparent"
-                                }
-                                z: 11
-                            }
+
+
+
 
                             // BADGE
                             Rectangle {
@@ -2232,6 +2264,45 @@ StyledButton {
                                     font.pixelSize: 14
                                     Layout.fillWidth: true
                                     elide: Text.ElideRight
+                                }
+
+                                // STAR RATING & COLOR LABEL CONTAINER
+                                Item {
+                                    visible: model.rating > 0 || model.colorLabel !== ""
+                                    Layout.alignment: Qt.AlignVCenter
+                                    implicitWidth: listPillBox.width
+                                    implicitHeight: listPillBox.height
+
+                                    Rectangle {
+                                        id: listPillBox
+                                        anchors.centerIn: parent
+                                        width: {
+                                            if (model.colorLabel !== "") {
+                                                return model.rating > 0 ? (listStarsText.implicitWidth + 12) : 24
+                                            }
+                                            return listStarsText.implicitWidth
+                                        }
+                                        height: model.colorLabel !== "" ? (model.rating > 0 ? 20 : 14) : 18
+                                        radius: height / 2
+                                        color: {
+                                            if (model.colorLabel === "Red")    return "#e05050"
+                                            if (model.colorLabel === "Yellow") return "#d4b800"
+                                            if (model.colorLabel === "Green")  return "#3caa3c"
+                                            if (model.colorLabel === "Blue")   return "#3a80d2"
+                                            if (model.colorLabel === "Purple") return "#9b59b6"
+                                            return "transparent"
+                                        }
+
+                                        Text {
+                                            id: listStarsText
+                                            visible: model.rating > 0
+                                            anchors.centerIn: parent
+                                            text: "★".repeat(model.rating)
+                                            color: "#ffffff"
+                                            font.pixelSize: 12
+                                            font.bold: true
+                                        }
+                                    }
                                 }
 
                                 Text {
