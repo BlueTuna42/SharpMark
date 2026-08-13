@@ -1162,6 +1162,7 @@ property bool isGridView: true
 
         onCurrentIndexChanged: {
             if (currentIndex >= 0 && currentIndex < backend.burstProxy.count) {
+                backend.preloadViewerWindow(currentIndex);
                 const file = backend.burstProxy.get(currentIndex).filePath
                 
                 viewerWindow.currentFilePath = file;
@@ -1179,8 +1180,6 @@ property bool isGridView: true
                 
                 viewerWindow.currentRating     = backend.getPhotoRating(file);
                 viewerWindow.currentColorLabel = backend.getPhotoColorLabel(file);
-
-                backend.preloadViewerWindow(currentIndex);
 
                 console.log("[QML] Photo changed. New Path:", viewerWindow.currentFilePath, "Rating:", viewerWindow.currentRating);
             }
@@ -2333,6 +2332,7 @@ StyledButton {
                                 anchors.fill: parent
                                 acceptedButtons: Qt.LeftButton
                                 onClicked: function(mouse) {
+                                    backend.preloadViewerWindow(index)
                                     if (mouse.modifiers & Qt.ControlModifier) {
                                         mainWindow.toggleOne(model.filePath, index)
                                     } else if (mouse.modifiers & Qt.ShiftModifier) {
@@ -2345,6 +2345,7 @@ StyledButton {
                                 }
                                 onDoubleClicked: {
                                     mainWindow.clearSelection()
+                                    backend.preloadViewerWindow(index)
                                     viewerWindow.currentIndex = index
                                     viewerWindow.show()
                                 }
@@ -2525,6 +2526,7 @@ StyledButton {
                                 anchors.fill: parent
                                 acceptedButtons: Qt.LeftButton
                                 onClicked: function(mouse) {
+                                    backend.preloadViewerWindow(index)
                                     if (mouse.modifiers & Qt.ControlModifier) {
                                         mainWindow.toggleOne(model.filePath, index)
                                     } else if (mouse.modifiers & Qt.ShiftModifier) {
@@ -2537,6 +2539,7 @@ StyledButton {
                                 }
                                 onDoubleClicked: {
                                     mainWindow.clearSelection()
+                                    backend.preloadViewerWindow(index)
                                     viewerWindow.currentIndex = index
                                     viewerWindow.show()
                                 }

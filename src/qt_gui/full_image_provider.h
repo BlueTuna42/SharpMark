@@ -32,7 +32,7 @@ class FullImageProvider : public QQuickImageProvider {
         int mode;
     };
 
-    static constexpr size_t MAX_CACHE_CAPACITY = 25; // Strict 25-image maximum RAM ceiling
+    static constexpr size_t MAX_CACHE_CAPACITY = 35; // 35-image maximum RAM ceiling
 
     mutable std::mutex m_cacheMutex;
     std::unordered_map<QString, CacheEntry> m_cache;
@@ -44,6 +44,19 @@ class FullImageProvider : public QQuickImageProvider {
     std::deque<QString> m_queue;
     std::atomic<bool> m_stopWorkers{false};
 
+    static QString cleanPathKey(const QString& rawPath) {
+        if (rawPath.isEmpty()) return QString();
+        QString p = QUrl::fromPercentEncoding(rawPath.toUtf8());
+#ifdef Q_OS_WIN
+        if      (p.startsWith("file:///")) p = p.mid(8);
+        else if (p.startsWith("file://"))  p = p.mid(7);
+        else if (p.startsWith("/"))        p = p.mid(1);
+#else
+        if (p.startsWith("file://")) p = p.mid(7);
+#endif
+        return QDir::cleanPath(p);
+    }
+
     static bool isRawExtension(const QString& ext) {
         static const QSet<QString> rawExts = {
             "3fr", "arw", "cr2", "cr3", "crw", "dcr", "dng", "erf", "fff",
@@ -53,7 +66,10 @@ class FullImageProvider : public QQuickImageProvider {
         return rawExts.contains(ext);
     }
 
-    void putInCache(const QString& path, const QImage& img, int mode) {
+    void putInCache(const QString& rawPath, const QImage& img, int mode) {
+        QString path = cleanPathKey(rawPath);
+        if (path.isEmpty()) return;
+
         std::lock_guard<std::mutex> lock(m_cacheMutex);
         
         auto it = m_cache.find(path);
@@ -65,7 +81,6 @@ class FullImageProvider : public QQuickImageProvider {
             return;
         }
 
-        // Strict LRU eviction: keep m_cache.size() strictly under MAX_CACHE_CAPACITY
         while (m_cache.size() >= MAX_CACHE_CAPACITY && !m_lruKeys.empty()) {
             QString oldest = m_lruKeys.front();
             m_lruKeys.pop_front();
@@ -99,15 +114,9 @@ public:
     }
 
     void preloadSingleImage(const QString& rawPath) {
-        if (rawPath.isEmpty()) return;
-        QString filePath = QUrl::fromPercentEncoding(rawPath.toUtf8());
-#ifdef Q_OS_WIN
-        if (filePath.startsWith("file:///")) {
-            filePath = filePath.mid(8);
-        } else if (filePath.startsWith('/')) {
-            filePath.remove(0, 1);
-        }
-#endif
+        QString filePath = cleanPathKey(rawPath);
+        if (filePath.isEmpty()) return;
+
         int mode = m_backend ? m_backend->rawViewMode() : 0;
 
         {
@@ -123,8 +132,7 @@ public:
             for (const QString& item : m_queue) {
                 if (item == filePath) return;
             }
-            // Cap worker queue length to 25 items
-            if (m_queue.size() >= 25) {
+            if (m_queue.size() >= 35) {
                 m_queue.pop_front();
             }
             m_queue.push_back(filePath);
@@ -138,8 +146,15 @@ public:
         int mode = m_backend ? m_backend->rawViewMode() : 0;
 
         QSet<QString> validWindowPaths;
+        std::vector<QString> cleanedPriority;
+        cleanedPriority.reserve(priorityPaths.size());
+
         for (const QString& path : priorityPaths) {
-            validWindowPaths.insert(path);
+            QString clean = cleanPathKey(path);
+            if (!clean.isEmpty()) {
+                validWindowPaths.insert(clean);
+                cleanedPriority.push_back(clean);
+            }
         }
 
         // Evict items from cache outside window or with mismatched mode
@@ -160,11 +175,11 @@ public:
         {
             std::lock_guard<std::mutex> qlock(m_queueMutex);
             m_queue.clear();
-            for (const QString& path : priorityPaths) {
+            for (const QString& cleanPath : cleanedPriority) {
                 std::lock_guard<std::mutex> clock(m_cacheMutex);
-                auto it = m_cache.find(path);
+                auto it = m_cache.find(cleanPath);
                 if (it == m_cache.end() || it->second.mode != mode) {
-                    m_queue.push_back(path);
+                    m_queue.push_back(cleanPath);
                 }
             }
         }
@@ -173,29 +188,14 @@ public:
 
     QImage requestImage(const QString& id, QSize* size, const QSize& requestedSize) override {
         Q_UNUSED(requestedSize)
-        qDebug() << "======================================";
-        qDebug() << "[FullImageProvider] Request received! ID:" << id;
+        QString filePath = cleanPathKey(id);
 
-        QString filePath = QUrl::fromPercentEncoding(id.toUtf8());
-#ifdef Q_OS_WIN
-        if (filePath.startsWith("file:///")) {
-            filePath = filePath.mid(8);
-        } else if (filePath.startsWith('/')) {
-            filePath.remove(0, 1);
-        }
-#endif
-
-        qDebug() << "[FullImageProvider] Cleaned file path:" << filePath;
-        
         QFileInfo fileInfo(filePath);
         if (!fileInfo.exists()) {
-            qDebug() << "[FullImageProvider] ERROR: File DOES NOT EXIST at path:" << filePath;
             return QImage();
         }
 
         const QString suffix = fileInfo.suffix().toLower();
-        qDebug() << "[FullImageProvider] Extension:" << suffix << " | isRaw:" << isRawExtension(suffix);
-
         int mode = m_backend ? m_backend->rawViewMode() : 0;
 
         // 1. Instant cache lookup
@@ -204,14 +204,11 @@ public:
             auto it = m_cache.find(filePath);
             if (it != m_cache.end() && it->second.mode == mode) {
                 QImage img = it->second.image;
-                // Touch LRU order
                 auto lruIt = std::find(m_lruKeys.begin(), m_lruKeys.end(), filePath);
                 if (lruIt != m_lruKeys.end()) m_lruKeys.erase(lruIt);
                 m_lruKeys.push_back(filePath);
 
-                qDebug() << "[FullImageProvider] INSTANT CACHE HIT! Returning cached QImage. Size:" << img.width() << "x" << img.height();
                 if (size) *size = img.size();
-                qDebug() << "======================================";
                 if (m_backend) {
                     AppBackend* b = m_backend;
                     QMetaObject::invokeMethod(b, [b, img]() {
@@ -223,17 +220,12 @@ public:
         }
 
         // 2. Direct decode fallback if not in cache
-        qDebug() << "[FullImageProvider] Cache miss! Decoding synchronously...";
         QImage image = loadImageDirect(filePath, mode);
         if (image.isNull()) {
-            qDebug() << "[FullImageProvider] ERROR: Final image is NULL. Returning empty QImage.";
             return QImage();
         }
 
-        qDebug() << "[FullImageProvider] Success! Image size:" << image.width() << "x" << image.height() << "Format:" << image.format();
-
         if (size) *size = image.size();
-        qDebug() << "======================================";
 
         if (m_backend) {
             AppBackend* b = m_backend;
@@ -287,133 +279,87 @@ private:
     }
 
     QImage loadRaw(const QString& filePath, int mode) {
-        LibRaw lr;
-        lr.imgdata.params.use_camera_wb = 1;
-
+        libraw_processed_image_t* image = nullptr;
+        int flip = 0;
         int ret = LIBRAW_SUCCESS;
+
+        {
+            std::lock_guard<std::mutex> rawLock(getLibRawMutex());
+            LibRaw lr;
+            lr.imgdata.params.use_camera_wb = 1;
+
 #if defined(_WIN32)
-        qDebug() << "[LibRaw] Trying to open via wstring_convert...";
-        ret = lr.open_file(filePath.toStdWString().c_str());
-        if (ret != LIBRAW_SUCCESS) {
-            qDebug() << "[LibRaw] wstring failed. Trying local8bit...";
-            ret = lr.open_file(filePath.toLocal8Bit().constData());
-        }
-#else
-        qDebug() << "[LibRaw] Opening utf8...";
-        ret = lr.open_file(filePath.toUtf8().constData());
-#endif
-        if (ret != LIBRAW_SUCCESS) {
-            qDebug() << "[LibRaw] ERROR: open_file failed with code:" << ret;
-            return QImage();
-        }
-        qDebug() << "[LibRaw] open_file success.";
-
-        if (mode == 0) {
-            qDebug() << "[LibRaw] Unpacking thumbnail...";
-            if (lr.unpack_thumb() == LIBRAW_SUCCESS) {
-                QImage thumb;
-                if (lr.imgdata.thumbnail.tformat == LIBRAW_THUMBNAIL_JPEG) {
-                    qDebug() << "[LibRaw] Extracted JPEG thumbnail successfully.";
-                    QByteArray thumbData(
-                        reinterpret_cast<const char*>(lr.imgdata.thumbnail.thumb),
-                        lr.imgdata.thumbnail.tlength
-                    );
-                    QBuffer buffer(&thumbData);
-                    buffer.open(QIODevice::ReadOnly);
-                    QImageReader reader(&buffer);
-                    reader.setAutoTransform(true);
-                    thumb = reader.read();
-
-                    int flip = lr.imgdata.sizes.flip;
-                    if (!thumb.isNull() && flip != 0) {
-                        if ((flip == 5 || flip == 6 || flip == 8) && thumb.width() >= thumb.height()) {
-                            QTransform t;
-                            if (flip == 6) t.rotate(90);
-                            else if (flip == 5 || flip == 8) t.rotate(270);
-                            thumb = thumb.transformed(t, Qt::SmoothTransformation);
-                        } else if (flip == 3 && thumb.width() >= thumb.height()) {
-                            QTransform t;
-                            t.rotate(180);
-                            thumb = thumb.transformed(t, Qt::SmoothTransformation);
-                        }
-                    }
-
-                    lr.recycle();
-                    return thumb;
-                } else {
-                    qDebug() << "[LibRaw] ERROR: Thumbnail format is not JPEG.";
-                }
-            } else {
-                qDebug() << "[LibRaw] ERROR: unpack_thumb failed.";
+            ret = lr.open_file(filePath.toStdWString().c_str());
+            if (ret != LIBRAW_SUCCESS) {
+                ret = lr.open_file(filePath.toLocal8Bit().constData());
             }
-        }
+#else
+            ret = lr.open_file(filePath.toUtf8().constData());
+#endif
+            if (ret != LIBRAW_SUCCESS) {
+                return QImage();
+            }
 
-        qDebug() << "[LibRaw] Decoding full matrix...";
-        // Mode 1: half_size = 1 (Ultra fast 50% RAW matrix decode)
-        // Mode 2: half_size = 0 (Full matrix RAW decode)
-        lr.imgdata.params.half_size = (mode == 1) ? 1 : 0;
-        lr.imgdata.params.output_bps = 8;
+            if (mode == 0) {
+                if (lr.unpack_thumb() == LIBRAW_SUCCESS) {
+                    if (lr.imgdata.thumbnail.tformat == LIBRAW_THUMBNAIL_JPEG) {
+                        QByteArray thumbData(
+                            reinterpret_cast<const char*>(lr.imgdata.thumbnail.thumb),
+                            lr.imgdata.thumbnail.tlength
+                        );
+                        QBuffer buffer(&thumbData);
+                        buffer.open(QIODevice::ReadOnly);
+                        QImageReader reader(&buffer);
+                        reader.setAutoTransform(true);
+                        QImage thumb = reader.read();
 
-        if (lr.unpack() != LIBRAW_SUCCESS) {
-            qDebug() << "[LibRaw] ERROR: unpack failed.";
+                        flip = lr.imgdata.sizes.flip;
+                        lr.recycle();
+
+                        if (!thumb.isNull() && flip != 0) {
+                            if ((flip == 5 || flip == 6 || flip == 8) && thumb.width() >= thumb.height()) {
+                                QTransform t;
+                                if (flip == 6) t.rotate(90);
+                                else if (flip == 5 || flip == 8) t.rotate(270);
+                                thumb = thumb.transformed(t, Qt::SmoothTransformation);
+                            } else if (flip == 3 && thumb.width() >= thumb.height()) {
+                                QTransform t;
+                                t.rotate(180);
+                                thumb = thumb.transformed(t, Qt::SmoothTransformation);
+                            }
+                        }
+                        return thumb;
+                    }
+                }
+            }
+
+            lr.imgdata.params.half_size = (mode == 1) ? 1 : 0;
+            lr.imgdata.params.output_bps = 8;
+
+            if (lr.unpack() != LIBRAW_SUCCESS || lr.dcraw_process() != LIBRAW_SUCCESS) {
+                lr.recycle();
+                return QImage();
+            }
+
+            image = lr.dcraw_make_mem_image(&ret);
+            flip = lr.imgdata.sizes.flip;
             lr.recycle();
-            return QImage();
         }
 
-        if (lr.dcraw_process() != LIBRAW_SUCCESS) {
-            qDebug() << "[LibRaw] ERROR: dcraw_process failed.";
-            lr.recycle();
-            return QImage();
-        }
-
-        libraw_processed_image_t* image = lr.dcraw_make_mem_image(&ret);
         if (!image) {
-            qDebug() << "[LibRaw] ERROR: dcraw_make_mem_image failed. Code:" << ret;
-            lr.recycle();
             return QImage();
         }
-
-        qDebug() << "[LibRaw] Matrix processed! Colors:" << image->colors << "Bits:" << image->bits;
 
         if (image->type != LIBRAW_IMAGE_BITMAP || image->colors < 3) {
-            qDebug() << "[LibRaw] ERROR: Output is not a valid RGB BITMAP.";
             LibRaw::dcraw_clear_mem(image);
-            lr.recycle();
             return QImage();
         }
 
         QImage result(image->width, image->height, QImage::Format_RGB888);
+        std::memcpy(result.bits(), image->data, image->data_size);
 
-        if (image->bits == 16) {
-            const unsigned short* src = reinterpret_cast<const unsigned short*>(image->data);
-            for (int y = 0; y < static_cast<int>(image->height); ++y) {
-                uchar* dst = result.scanLine(y);
-                for (int x = 0; x < static_cast<int>(image->width); ++x) {
-                    const int si = (y * static_cast<int>(image->width) + x) * image->colors;
-                    const int di = x * 3;
-                    dst[di]     = static_cast<uchar>(src[si] >> 8);
-                    dst[di + 1] = static_cast<uchar>(src[si + 1] >> 8);
-                    dst[di + 2] = static_cast<uchar>(src[si + 2] >> 8);
-                }
-            }
-        } else {
-            for (int y = 0; y < static_cast<int>(image->height); ++y) {
-                uchar* dst = result.scanLine(y);
-                for (int x = 0; x < static_cast<int>(image->width); ++x) {
-                    const int si = (y * static_cast<int>(image->width) + x) * image->colors;
-                    const int di = x * 3;
-                    dst[di]     = image->data[si];
-                    dst[di + 1] = image->data[si + 1];
-                    dst[di + 2] = image->data[si + 2];
-                }
-            }
-        }
-
-        qDebug() << "[LibRaw] Memory copied successfully to QImage.";
         LibRaw::dcraw_clear_mem(image);
-        lr.recycle();
 
-        int flip = lr.imgdata.sizes.flip;
         if (!result.isNull() && flip != 0) {
             if ((flip == 5 || flip == 6 || flip == 8) && result.width() >= result.height()) {
                 QTransform t;
@@ -431,17 +377,11 @@ private:
     }
 
     void startWorkerPool() {
-        unsigned int threads = 2; // Dedicated preloading worker threads
+        unsigned int threads = (std::max)(4u, std::thread::hardware_concurrency() / 2); // Dynamic parallel preloading worker pool
         m_stopWorkers = false;
         for (unsigned int i = 0; i < threads; ++i) {
             m_workers.emplace_back([this]() {
                 while (!m_stopWorkers) {
-                    // FIRST: Yield completely while preview thumbnails are loading for the UI!
-                    if (ThumbnailProvider::isPreviewLoading()) {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(30));
-                        continue;
-                    }
-
                     QString path;
                     {
                         std::unique_lock<std::mutex> lock(m_queueMutex);
@@ -463,14 +403,6 @@ private:
                         if (it != m_cache.end() && it->second.mode == mode) {
                             continue;
                         }
-                    }
-
-                    // Check again before heavy decode
-                    if (ThumbnailProvider::isPreviewLoading()) {
-                        std::lock_guard<std::mutex> qlock(m_queueMutex);
-                        m_queue.push_front(path);
-                        std::this_thread::sleep_for(std::chrono::milliseconds(30));
-                        continue;
                     }
 
                     QImage img = loadImageDirect(path, mode);
