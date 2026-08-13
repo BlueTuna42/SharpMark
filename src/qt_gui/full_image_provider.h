@@ -28,8 +28,13 @@ class FullImageProvider : public QQuickImageProvider {
     AppBackend* m_backend;
 
     struct CacheEntry {
-        QImage image;
-        int mode;
+        QImage previewImage; // Half size (mode 1) or thumbnail (mode 0)
+        QImage fullImage;    // Full resolution decode (mode 2)
+    };
+
+    struct PreloadTask {
+        QString path;
+        int mode; // 0 = thumb, 1 = half-size, 2 = full-size
     };
 
     static constexpr size_t MAX_CACHE_CAPACITY = 35; // 35-image maximum RAM ceiling
@@ -41,7 +46,7 @@ class FullImageProvider : public QQuickImageProvider {
     std::vector<std::thread> m_workers;
     std::mutex m_queueMutex;
     std::condition_variable m_cv;
-    std::deque<QString> m_queue;
+    std::deque<PreloadTask> m_queue;
     std::atomic<bool> m_stopWorkers{false};
 
     static QString cleanPathKey(const QString& rawPath) {
@@ -68,13 +73,17 @@ class FullImageProvider : public QQuickImageProvider {
 
     void putInCache(const QString& rawPath, const QImage& img, int mode) {
         QString path = cleanPathKey(rawPath);
-        if (path.isEmpty()) return;
+        if (path.isEmpty() || img.isNull()) return;
 
         std::lock_guard<std::mutex> lock(m_cacheMutex);
         
         auto it = m_cache.find(path);
         if (it != m_cache.end()) {
-            it->second = { img, mode };
+            if (mode == 2) {
+                it->second.fullImage = img;
+            } else {
+                it->second.previewImage = img;
+            }
             auto lruIt = std::find(m_lruKeys.begin(), m_lruKeys.end(), path);
             if (lruIt != m_lruKeys.end()) m_lruKeys.erase(lruIt);
             m_lruKeys.push_back(path);
@@ -87,7 +96,13 @@ class FullImageProvider : public QQuickImageProvider {
             m_cache.erase(oldest);
         }
 
-        m_cache[path] = { img, mode };
+        CacheEntry entry;
+        if (mode == 2) {
+            entry.fullImage = img;
+        } else {
+            entry.previewImage = img;
+        }
+        m_cache[path] = entry;
         m_lruKeys.push_back(path);
     }
 
@@ -113,37 +128,81 @@ public:
         }
     }
 
-    void preloadSingleImage(const QString& rawPath) {
+    bool isFullImageLoaded(const QString& rawPath) const {
+        QString path = cleanPathKey(rawPath);
+        if (path.isEmpty()) return false;
+        std::lock_guard<std::mutex> lock(m_cacheMutex);
+        auto it = m_cache.find(path);
+        if (it != m_cache.end()) {
+            return !it->second.fullImage.isNull();
+        }
+        return false;
+    }
+
+    void prioritizeFullImage(const QString& rawPath) {
         QString filePath = cleanPathKey(rawPath);
         if (filePath.isEmpty()) return;
 
-        int mode = m_backend ? m_backend->rawViewMode() : 0;
-
         {
-            std::lock_guard<std::mutex> lock(m_cacheMutex);
+            std::lock_guard<std::mutex> clock(m_cacheMutex);
             auto it = m_cache.find(filePath);
-            if (it != m_cache.end() && it->second.mode == mode) {
+            if (it != m_cache.end() && !it->second.fullImage.isNull()) {
+                if (m_backend) {
+                    AppBackend* b = m_backend;
+                    QMetaObject::invokeMethod(b, [b, filePath]() {
+                        emit b->fullImageLoaded(filePath);
+                    }, Qt::QueuedConnection);
+                }
                 return;
             }
         }
 
         {
             std::lock_guard<std::mutex> qlock(m_queueMutex);
-            for (const QString& item : m_queue) {
-                if (item == filePath) return;
+            for (auto it = m_queue.begin(); it != m_queue.end(); ) {
+                if (it->path == filePath && it->mode == 2) {
+                    it = m_queue.erase(it);
+                } else {
+                    ++it;
+                }
             }
-            if (m_queue.size() >= 35) {
-                m_queue.pop_front();
-            }
-            m_queue.push_back(filePath);
+            m_queue.push_front({ filePath, 2 });
         }
         m_cv.notify_one();
     }
 
-    // Thread-safe: preloads 10 images behind current index and 20 ahead using main-thread snapshot
+    void preloadSingleImage(const QString& rawPath) {
+        QString filePath = cleanPathKey(rawPath);
+        if (filePath.isEmpty()) return;
+
+        int viewMode = m_backend ? m_backend->rawViewMode() : 0;
+        int targetMode = (viewMode == 0 ? 0 : 1);
+
+        {
+            std::lock_guard<std::mutex> lock(m_cacheMutex);
+            auto it = m_cache.find(filePath);
+            if (it != m_cache.end() && !it->second.previewImage.isNull()) {
+                return;
+            }
+        }
+
+        {
+            std::lock_guard<std::mutex> qlock(m_queueMutex);
+            for (const auto& item : m_queue) {
+                if (item.path == filePath && item.mode == targetMode) return;
+            }
+            if (m_queue.size() >= 35) {
+                m_queue.pop_front();
+            }
+            m_queue.push_back({ filePath, targetMode });
+        }
+        m_cv.notify_one();
+    }
+
+    // Thread-safe: preloads half-sized images for window and full-sized image for current photo
     void updatePreloadWindow(int currentIndex, const std::vector<QString>& priorityPaths) {
         Q_UNUSED(currentIndex)
-        int mode = m_backend ? m_backend->rawViewMode() : 0;
+        int viewMode = m_backend ? m_backend->rawViewMode() : 0;
 
         QSet<QString> validWindowPaths;
         std::vector<QString> cleanedPriority;
@@ -157,11 +216,11 @@ public:
             }
         }
 
-        // Evict items from cache outside window or with mismatched mode
+        // Evict items from cache outside window
         {
             std::lock_guard<std::mutex> lock(m_cacheMutex);
             for (auto it = m_cache.begin(); it != m_cache.end(); ) {
-                if (!validWindowPaths.contains(it->first) || it->second.mode != mode) {
+                if (!validWindowPaths.contains(it->first)) {
                     auto lruIt = std::find(m_lruKeys.begin(), m_lruKeys.end(), it->first);
                     if (lruIt != m_lruKeys.end()) m_lruKeys.erase(lruIt);
                     it = m_cache.erase(it);
@@ -171,15 +230,44 @@ public:
             }
         }
 
-        // Enqueue missing prioritized items into background worker queue
+        // Enqueue prioritized tasks into background worker queue
         {
             std::lock_guard<std::mutex> qlock(m_queueMutex);
             m_queue.clear();
-            for (const QString& cleanPath : cleanedPriority) {
-                std::lock_guard<std::mutex> clock(m_cacheMutex);
-                auto it = m_cache.find(cleanPath);
-                if (it == m_cache.end() || it->second.mode != mode) {
-                    m_queue.push_back(cleanPath);
+
+            if (!cleanedPriority.empty()) {
+                const QString& currentPath = cleanedPriority.front();
+                bool needFull = (viewMode == 2);
+                bool needHalf = true;
+
+                {
+                    std::lock_guard<std::mutex> clock(m_cacheMutex);
+                    auto it = m_cache.find(currentPath);
+                    if (it != m_cache.end()) {
+                        if (!it->second.previewImage.isNull()) needHalf = false;
+                        if (!it->second.fullImage.isNull()) needFull = false;
+                    }
+                }
+
+                // 1. Current photo preview (half size) first if missing (< 30ms)
+                if (needHalf) {
+                    m_queue.push_back({ currentPath, (viewMode == 0 ? 0 : 1) });
+                }
+
+                // 2. Current photo full resolution with top priority if in full size mode
+                if (needFull) {
+                    m_queue.push_back({ currentPath, 2 });
+                }
+
+                // 3. Preload half-size previews for all remaining images in window
+                int previewMode = (viewMode == 0 ? 0 : 1);
+                for (size_t i = 1; i < cleanedPriority.size(); ++i) {
+                    const QString& p = cleanedPriority[i];
+                    std::lock_guard<std::mutex> clock(m_cacheMutex);
+                    auto it = m_cache.find(p);
+                    if (it == m_cache.end() || it->second.previewImage.isNull()) {
+                        m_queue.push_back({ p, previewMode });
+                    }
                 }
             }
         }
@@ -188,7 +276,15 @@ public:
 
     QImage requestImage(const QString& id, QSize* size, const QSize& requestedSize) override {
         Q_UNUSED(requestedSize)
-        QString filePath = cleanPathKey(id);
+        QString rawId = id;
+        bool forceFull = false;
+        if (rawId.contains("?full=") || rawId.contains("&full=")) {
+            forceFull = true;
+            int qIdx = rawId.indexOf('?');
+            if (qIdx != -1) rawId = rawId.left(qIdx);
+        }
+
+        QString filePath = cleanPathKey(rawId);
 
         QFileInfo fileInfo(filePath);
         if (!fileInfo.exists()) {
@@ -196,31 +292,65 @@ public:
         }
 
         const QString suffix = fileInfo.suffix().toLower();
-        int mode = m_backend ? m_backend->rawViewMode() : 0;
+        int viewMode = m_backend ? m_backend->rawViewMode() : 0;
 
-        // 1. Instant cache lookup
+        // 1. Cache lookup
         {
             std::lock_guard<std::mutex> lock(m_cacheMutex);
             auto it = m_cache.find(filePath);
-            if (it != m_cache.end() && it->second.mode == mode) {
-                QImage img = it->second.image;
-                auto lruIt = std::find(m_lruKeys.begin(), m_lruKeys.end(), filePath);
-                if (lruIt != m_lruKeys.end()) m_lruKeys.erase(lruIt);
-                m_lruKeys.push_back(filePath);
-
-                if (size) *size = img.size();
-                if (m_backend) {
-                    AppBackend* b = m_backend;
-                    QMetaObject::invokeMethod(b, [b, img]() {
-                        b->updateHistogramFromImage(img);
-                    }, Qt::QueuedConnection);
+            if (it != m_cache.end()) {
+                QImage img;
+                if (forceFull) {
+                    img = !it->second.fullImage.isNull() ? it->second.fullImage : it->second.previewImage;
+                } else {
+                    img = !it->second.fullImage.isNull() ? it->second.fullImage : it->second.previewImage;
                 }
-                return img;
+
+                if (!img.isNull()) {
+                    auto lruIt = std::find(m_lruKeys.begin(), m_lruKeys.end(), filePath);
+                    if (lruIt != m_lruKeys.end()) m_lruKeys.erase(lruIt);
+                    m_lruKeys.push_back(filePath);
+
+                    if (size) *size = img.size();
+                    if (m_backend) {
+                        AppBackend* b = m_backend;
+                        QMetaObject::invokeMethod(b, [b, img]() {
+                            b->updateHistogramFromImage(img);
+                        }, Qt::QueuedConnection);
+                    }
+                    return img;
+                }
             }
         }
 
         // 2. Direct decode fallback if not in cache
-        QImage image = loadImageDirect(filePath, mode);
+        QImage image;
+        if (isRawExtension(suffix)) {
+            if (viewMode == 2 || forceFull) {
+                // Return fast preview (< 30ms) immediately to keep UI fluid
+                image = loadRaw(filePath, 1);
+                if (!image.isNull()) {
+                    if (image.format() != QImage::Format_RGB32 && image.format() != QImage::Format_ARGB32) {
+                        image = image.convertToFormat(QImage::Format_RGB32);
+                    }
+                    if (m_backend) image = m_backend->applyViewerLut(image);
+                    putInCache(filePath, image, 1);
+                    // Ensure full resolution decode is queued in background
+                    prioritizeFullImage(filePath);
+                }
+            } else {
+                image = loadImageDirect(filePath, viewMode);
+                if (!image.isNull()) {
+                    putInCache(filePath, image, viewMode);
+                }
+            }
+        } else {
+            image = loadImageDirect(filePath, viewMode);
+            if (!image.isNull()) {
+                putInCache(filePath, image, 2);
+            }
+        }
+
         if (image.isNull()) {
             return QImage();
         }
@@ -234,7 +364,6 @@ public:
             }, Qt::QueuedConnection);
         }
 
-        putInCache(filePath, image, mode);
         return image;
     }
 
@@ -282,11 +411,13 @@ private:
         libraw_processed_image_t* image = nullptr;
         int flip = 0;
         int ret = LIBRAW_SUCCESS;
+        LibRaw lr;
+        lr.imgdata.params.use_camera_wb = 1;
+        lr.imgdata.params.half_size = (mode == 1 || mode == 0) ? 1 : 0;
+        lr.imgdata.params.output_bps = 8;
 
         {
             std::lock_guard<std::mutex> rawLock(getLibRawMutex());
-            LibRaw lr;
-            lr.imgdata.params.use_camera_wb = 1;
 
 #if defined(_WIN32)
             ret = lr.open_file(filePath.toStdWString().c_str());
@@ -333,18 +464,20 @@ private:
                 }
             }
 
-            lr.imgdata.params.half_size = (mode == 1) ? 1 : 0;
-            lr.imgdata.params.output_bps = 8;
-
-            if (lr.unpack() != LIBRAW_SUCCESS || lr.dcraw_process() != LIBRAW_SUCCESS) {
+            if (lr.unpack() != LIBRAW_SUCCESS) {
                 lr.recycle();
                 return QImage();
             }
+        } // Unlocked here so dcraw_process runs 100% in parallel across worker threads
 
-            image = lr.dcraw_make_mem_image(&ret);
-            flip = lr.imgdata.sizes.flip;
+        if (lr.dcraw_process() != LIBRAW_SUCCESS) {
             lr.recycle();
+            return QImage();
         }
+
+        image = lr.dcraw_make_mem_image(&ret);
+        flip = lr.imgdata.sizes.flip;
+        lr.recycle();
 
         if (!image) {
             return QImage();
@@ -382,7 +515,7 @@ private:
         for (unsigned int i = 0; i < threads; ++i) {
             m_workers.emplace_back([this]() {
                 while (!m_stopWorkers) {
-                    QString path;
+                    PreloadTask task;
                     {
                         std::unique_lock<std::mutex> lock(m_queueMutex);
                         m_cv.wait_for(lock, std::chrono::milliseconds(50), [this]() {
@@ -390,24 +523,31 @@ private:
                         });
                         if (m_stopWorkers) return;
                         if (m_queue.empty()) continue;
-                        path = m_queue.front();
+                        task = m_queue.front();
                         m_queue.pop_front();
                     }
 
-                    if (path.isEmpty()) continue;
-                    int mode = m_backend ? m_backend->rawViewMode() : 0;
+                    if (task.path.isEmpty()) continue;
 
                     {
                         std::lock_guard<std::mutex> lock(m_cacheMutex);
-                        auto it = m_cache.find(path);
-                        if (it != m_cache.end() && it->second.mode == mode) {
-                            continue;
+                        auto it = m_cache.find(task.path);
+                        if (it != m_cache.end()) {
+                            if (task.mode == 2 && !it->second.fullImage.isNull()) continue;
+                            if (task.mode != 2 && !it->second.previewImage.isNull()) continue;
                         }
                     }
 
-                    QImage img = loadImageDirect(path, mode);
+                    QImage img = loadImageDirect(task.path, task.mode);
                     if (!img.isNull()) {
-                        putInCache(path, img, mode);
+                        putInCache(task.path, img, task.mode);
+                        if (task.mode == 2 && m_backend) {
+                            AppBackend* b = m_backend;
+                            QString p = task.path;
+                            QMetaObject::invokeMethod(b, [b, p]() {
+                                emit b->fullImageLoaded(p);
+                            }, Qt::QueuedConnection);
+                        }
                     }
                 }
             });

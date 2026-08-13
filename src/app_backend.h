@@ -642,11 +642,13 @@ public:
 
     Q_INVOKABLE QString logFilePath() const;
 
-    // Fast Viewer Preloading
+    // Fast Viewer Preloading & Progressive Loading
     void setFullImageProvider(FullImageProvider* provider);
     Q_INVOKABLE void preloadViewerWindow(int currentIndex);
     Q_INVOKABLE void preloadImage(const QString& filePath);
     Q_INVOKABLE void clearViewerPreloadCache();
+    Q_INVOKABLE bool isFullImageLoaded(const QString& filePath) const;
+    Q_INVOKABLE void requestFullImage(const QString& filePath);
 
     // Cache Management
     Q_INVOKABLE QVariantList getCachedFoldersList() const;
@@ -741,6 +743,7 @@ signals:
     void lutEnabledChanged();
     void activeLutChanged();
     void externalEditorPathChanged();
+    void fullImageLoaded(const QString& filePath);
     
     void fileFound(const QString &fileName, const QString &filePath, int index);
     void fileProcessed(int index, bool isRejected, QString rejectReason, float aestheticScore, int width, int height);

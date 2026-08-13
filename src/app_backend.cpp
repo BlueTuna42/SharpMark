@@ -1319,6 +1319,19 @@ void AppBackend::clearViewerPreloadCache() {
     }
 }
 
+bool AppBackend::isFullImageLoaded(const QString& filePath) const {
+    if (m_fullImageProvider) {
+        return m_fullImageProvider->isFullImageLoaded(filePath);
+    }
+    return false;
+}
+
+void AppBackend::requestFullImage(const QString& filePath) {
+    if (m_fullImageProvider) {
+        m_fullImageProvider->prioritizeFullImage(filePath);
+    }
+}
+
 int AppBackend::rawAnalysisMode() const { return m_rawAnalysisMode; }
 void AppBackend::setRawAnalysisMode(int mode) { if (m_rawAnalysisMode != mode) { m_rawAnalysisMode = mode; saveSettings(); emit rawAnalysisModeChanged(); } }
 

@@ -1185,7 +1185,16 @@ property bool isGridView: true
             }
         }
 
-        // Reload the current image whenever the active LUT changes
+        function loadFullResolution() {
+            if (backend.rawViewMode === 2 && currentFilePath !== "") {
+                const fullSource = "image://full/" + encodeURIComponent(currentFilePath) + "?full=1";
+                if (viewerImage.source.toString() !== fullSource) {
+                    viewerImage.source = fullSource;
+                }
+            }
+        }
+
+        // Reload the current image whenever the active LUT changes or full resolution is ready
         Connections {
             target: backend
             function onActiveLutChanged() {
@@ -1194,6 +1203,18 @@ property bool isGridView: true
                     const file = backend.burstProxy.get(viewerWindow.currentIndex).filePath
                     viewerImage.source = ""
                     viewerImage.source = "image://full/" + encodeURIComponent(file)
+                }
+            }
+            function onFullImageLoaded(filePath) {
+                if (viewerWindow.visible && backend.rawViewMode === 2) {
+                    let cur = viewerWindow.currentFilePath.replace(/^file:\/\/\//, "").replace(/^file:\/\//, "").replace(/\\/g, "/");
+                    let loaded = filePath.replace(/^file:\/\/\//, "").replace(/^file:\/\//, "").replace(/\\/g, "/");
+                    if (cur === loaded || cur.endsWith(loaded) || loaded.endsWith(cur)) {
+                        console.log("[QML] Full resolution ready for current photo! Scale:", viewerImage.scale);
+                        if (viewerImage.scale > 1.01) {
+                            viewerWindow.loadFullResolution();
+                        }
+                    }
                 }
             }
         }
@@ -1238,6 +1259,14 @@ property bool isGridView: true
                                 let ratio = newScale / oldScale;
                                 flickable.contentX = flickable.contentX * ratio + wheel.x * (ratio - 1);
                                 flickable.contentY = flickable.contentY * ratio + wheel.y * (ratio - 1);
+
+                                if (newScale > 1.01 && backend.rawViewMode === 2) {
+                                    if (backend.isFullImageLoaded(viewerWindow.currentFilePath)) {
+                                        viewerWindow.loadFullResolution();
+                                    } else {
+                                        backend.requestFullImage(viewerWindow.currentFilePath);
+                                    }
+                                }
                             }
                         }
                     }
