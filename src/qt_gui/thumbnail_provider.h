@@ -11,8 +11,18 @@
 #include <QSet>
 #include <QDebug>
 #include <libraw/libraw.h>
+#include <atomic>
+#include "../tools/raw_mutex.h"
 
 class ThumbnailProvider : public QQuickImageProvider {
+public:
+    inline static std::atomic<int> s_activePreviewCount{0};
+
+    static bool isPreviewLoading() {
+        return s_activePreviewCount.load() > 0;
+    }
+
+private:
     static bool isRawExtension(const QString& ext) {
         static const QSet<QString> rawExts = {
             "cr2", "cr3", "crw", "nef", "nrw", "arw", "srf", "sr2", 
@@ -26,6 +36,11 @@ public:
     ThumbnailProvider() : QQuickImageProvider(QQuickImageProvider::Image) {}
 
     QImage requestImage(const QString &id, QSize *size, const QSize &requestedSize) override {
+        struct PreviewScope {
+            PreviewScope() { ThumbnailProvider::s_activePreviewCount++; }
+            ~PreviewScope() { ThumbnailProvider::s_activePreviewCount--; }
+        } scope;
+
         QString filePath = QUrl::fromPercentEncoding(id.toUtf8());
         
 #ifdef Q_OS_WIN
@@ -80,6 +95,7 @@ private:
     }
 
     QImage extractRawThumbnail(const QString &filePath) {
+        std::lock_guard<std::mutex> rawLock(getLibRawMutex());
         LibRaw rawProcessor;
         
         rawProcessor.imgdata.params.use_camera_wb = 1;

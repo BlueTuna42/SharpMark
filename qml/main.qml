@@ -46,6 +46,7 @@ property bool isGridView: true
         selectedPaths = obj
         selectedCount = 1
         lastClickedProxyIndex = proxyIndex
+        if (proxyIndex >= 0) backend.preloadViewerWindow(proxyIndex)
     }
 
     function toggleOne(filePath, proxyIndex) {
@@ -59,6 +60,7 @@ property bool isGridView: true
         }
         selectedPaths = obj
         lastClickedProxyIndex = proxyIndex
+        if (proxyIndex >= 0) backend.preloadViewerWindow(proxyIndex)
     }
 
     function selectRange(toProxyIndex) {
@@ -74,7 +76,7 @@ property bool isGridView: true
         }
         selectedPaths = obj
         selectedCount = Object.keys(selectedPaths).length
-        // lastClickedProxyIndex stays as the anchor
+        if (toProxyIndex >= 0) backend.preloadViewerWindow(toProxyIndex)
     }
 
     function clearSelection() {
@@ -933,9 +935,12 @@ property bool isGridView: true
         visible: false
 
         onVisibleChanged: {
-            if (!visible) {
+            if (visible) {
+                if (currentIndex >= 0) backend.preloadViewerWindow(currentIndex)
+            } else {
                 viewerImage.source = ""
                 viewerWindow.currentFilePath = ""
+                backend.clearViewerPreloadCache()
             }
         }
 
@@ -976,6 +981,8 @@ property bool isGridView: true
                 
                 viewerWindow.currentRating     = backend.getPhotoRating(file);
                 viewerWindow.currentColorLabel = backend.getPhotoColorLabel(file);
+
+                backend.preloadViewerWindow(currentIndex);
 
                 console.log("[QML] Photo changed. New Path:", viewerWindow.currentFilePath, "Rating:", viewerWindow.currentRating);
             }
@@ -2099,6 +2106,7 @@ StyledButton {
                     delegate: Item {
                         width: 220  // Matches cellWidth
                         height: 260 // Matches cellHeight
+                        Component.onCompleted: if (model.filePath) backend.preloadImage(model.filePath)
 
                         // --- THE SEAMLESS BATCH FRAME ---
                         Rectangle {
@@ -2288,9 +2296,10 @@ StyledButton {
                         }
                     }
 
-                                        delegate: Item {
+                    delegate: Item {
                         width: ListView.view.width
                         height: 68 // 60 for the card + 8 for spacing
+                        Component.onCompleted: if (model.filePath) backend.preloadImage(model.filePath)
 
                         // --- THE SEAMLESS BATCH FRAME ---
                         Rectangle {

@@ -28,6 +28,8 @@
 
 #include "tools/XMP_tools.h"  
 #include "tools/scan.h"
+#include "tools/raw_mutex.h"
+#include "qt_gui/full_image_provider.h"
 #include "img_tools/bmp.h"
 #include "gui/utils/path_utils.h"
 #include "pipeline/interfaces.h"
@@ -430,6 +432,7 @@ QVariantMap AppBackend::getPhotoMetadata(const QString& rawPath) {
 
     // 3. Deep Path: Use LibRaw for professional formats (RAW)
     if (!foundData) {
+        std::lock_guard<std::mutex> rawLock(getLibRawMutex());
         LibRaw lr;
         int ret = LIBRAW_SUCCESS;
         
@@ -1256,7 +1259,63 @@ bool AppBackend::writeExif() const { return m_writeExif; }
 void AppBackend::setWriteExif(bool write) { if (m_writeExif != write) { m_writeExif = write; saveSettings(); emit writeExifChanged(); } }
 
 int AppBackend::rawViewMode() const { return m_rawViewMode; }
-void AppBackend::setRawViewMode(int mode) { if (m_rawViewMode != mode) { m_rawViewMode = mode; saveSettings(); emit rawViewModeChanged(); } }
+void AppBackend::setRawViewMode(int mode) {
+    if (m_rawViewMode != mode) {
+        m_rawViewMode = mode;
+        saveSettings();
+        clearViewerPreloadCache();
+        emit rawViewModeChanged();
+    }
+}
+
+void AppBackend::setFullImageProvider(FullImageProvider* provider) {
+    m_fullImageProvider = provider;
+}
+
+void AppBackend::preloadViewerWindow(int currentIndex) {
+    if (!m_fullImageProvider) return;
+    
+    int count = m_burstProxy.count();
+    if (count <= 0 || currentIndex < 0 || currentIndex >= count) return;
+
+    int start = std::max(0, currentIndex - 10);
+    int end   = std::min(count - 1, currentIndex + 20);
+
+    std::vector<QString> priorityPaths;
+    priorityPaths.reserve(end - start + 1);
+
+    // 1. Priority #1: Current image
+    QString currentPath = m_burstProxy.get(currentIndex).value("filePath").toString();
+    if (!currentPath.isEmpty()) {
+        priorityPaths.push_back(currentPath);
+    }
+
+    // 2. Priority #2: Ahead images (currentIndex + 1 -> end)
+    for (int i = currentIndex + 1; i <= end; ++i) {
+        QString p = m_burstProxy.get(i).value("filePath").toString();
+        if (!p.isEmpty()) priorityPaths.push_back(p);
+    }
+
+    // 3. Priority #3: Behind images (currentIndex - 1 down to start)
+    for (int i = currentIndex - 1; i >= start; --i) {
+        QString p = m_burstProxy.get(i).value("filePath").toString();
+        if (!p.isEmpty()) priorityPaths.push_back(p);
+    }
+
+    m_fullImageProvider->updatePreloadWindow(currentIndex, priorityPaths);
+}
+
+void AppBackend::preloadImage(const QString& filePath) {
+    if (m_fullImageProvider) {
+        m_fullImageProvider->preloadSingleImage(filePath);
+    }
+}
+
+void AppBackend::clearViewerPreloadCache() {
+    if (m_fullImageProvider) {
+        m_fullImageProvider->clearCache();
+    }
+}
 
 int AppBackend::rawAnalysisMode() const { return m_rawAnalysisMode; }
 void AppBackend::setRawAnalysisMode(int mode) { if (m_rawAnalysisMode != mode) { m_rawAnalysisMode = mode; saveSettings(); emit rawAnalysisModeChanged(); } }

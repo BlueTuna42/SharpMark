@@ -589,6 +589,8 @@ private:
     mutable int m_colorLabelRole = -1;
 };
 
+class FullImageProvider;
+
 class AppBackend : public QObject {
     Q_OBJECT
     
@@ -638,6 +640,12 @@ public:
     Q_INVOKABLE void    setPhotoColorLabel(const QString& filePath, const QString& label);
 
     Q_INVOKABLE QString logFilePath() const;
+
+    // Fast Viewer Preloading
+    void setFullImageProvider(FullImageProvider* provider);
+    Q_INVOKABLE void preloadViewerWindow(int currentIndex);
+    Q_INVOKABLE void preloadImage(const QString& filePath);
+    Q_INVOKABLE void clearViewerPreloadCache();
 
     // External editor — open one or more files in the configured application
     Q_INVOKABLE void openInExternalEditor(const QStringList& filePaths);
@@ -763,6 +771,7 @@ private:
 
     bool m_groupBursts = true;
     BurstFilterProxyModel m_burstProxy;
+    FullImageProvider* m_fullImageProvider = nullptr;
 
     void setStatusText(const QString &text);
     void setProgress(int value);

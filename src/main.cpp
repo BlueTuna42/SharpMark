@@ -128,8 +128,11 @@ int main(int argc, char *argv[]) {
         engine.rootContext()->setContextProperty("backend", &backend);
 
         // Register custom image providers
-        engine.addImageProvider(QLatin1String("preview"), new ThumbnailProvider);
-        engine.addImageProvider(QLatin1String("full"), new FullImageProvider(&backend));
+        ThumbnailProvider* thumbProvider = new ThumbnailProvider;
+        FullImageProvider* fullProvider = new FullImageProvider(&backend);
+        engine.addImageProvider(QLatin1String("preview"), thumbProvider);
+        engine.addImageProvider(QLatin1String("full"), fullProvider);
+        backend.setFullImageProvider(fullProvider);
 
         const QUrl url(u"qrc:/SharpMark/qml/main.qml"_qs);
         QObject::connect(&engine, &QQmlApplicationEngine::objectCreated,
