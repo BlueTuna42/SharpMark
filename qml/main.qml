@@ -932,6 +932,13 @@ property bool isGridView: true
         color: "#050505"
         visible: false
 
+        onVisibleChanged: {
+            if (!visible) {
+                viewerImage.source = ""
+                viewerWindow.currentFilePath = ""
+            }
+        }
+
         property int currentIndex: -1
         property string exifInfo: ""
         property bool sidebarVisible: true
@@ -2076,6 +2083,7 @@ StyledButton {
                     clip: true
                     cellWidth: 220
                     cellHeight: 260
+                    cacheBuffer: 1300 // Constrain loaded preview window to displayed + approx +/-25 previews
                     visible: isGridView
 
                     ScrollBar.vertical: ScrollBar {
@@ -2267,6 +2275,7 @@ StyledButton {
                     model: backend.burstProxy
                     clip: true
                     spacing: 4
+                    cacheBuffer: 1500 // Constrain loaded preview window to displayed + approx +/-25 previews
                     visible: !isGridView
 
                     ScrollBar.vertical: ScrollBar {

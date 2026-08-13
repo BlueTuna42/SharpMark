@@ -1369,7 +1369,7 @@ void AppBackend::selectFolder(const QString &folderPath) {
                 if (!rf.is_open()) continue;
 
                 std::string buf;
-                buf.resize(2048 * 1024);
+                buf.resize(256 * 1024);
                 rf.read(&buf[0], buf.size());
                 buf.resize(rf.gcount());
                 if (buf.empty()) continue;

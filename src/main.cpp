@@ -10,6 +10,7 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QPixmapCache>
 #include "app_backend.h"
 
 #ifdef _WIN32
@@ -121,6 +122,7 @@ int main(int argc, char *argv[]) {
         AppBackend backend;
 
         QQmlApplicationEngine engine;
+        QPixmapCache::setCacheLimit(32 * 1024); // Limit Qt Quick image pixmap cache to 32MB RAM
 
         // Expose the backend object to QML under the name "backend"
         engine.rootContext()->setContextProperty("backend", &backend);
