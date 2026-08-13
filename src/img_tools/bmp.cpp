@@ -14,6 +14,7 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "../Lib/stb_image.h"
 #include <libraw/libraw.h>
+#include "../tools/raw_mutex.h"
 
 std::unique_ptr<ImageBuffer> ImageIO::readImage(const QString& filename, int rawMode, bool wantRGB) {
 #ifdef _WIN32
@@ -32,6 +33,7 @@ std::unique_ptr<ImageBuffer> ImageIO::readImage(const QString& filename, int raw
                   strcasecmp(ext.c_str(), ".RW2") == 0 || strcasecmp(ext.c_str(), ".RAF") == 0);
 
     if (isRaw) {
+        std::lock_guard<std::mutex> rawLock(getLibRawMutex());
         libraw_data_t *lr = libraw_init(0);
         if (!lr) return nullptr;
 
@@ -153,6 +155,7 @@ bool ImageIO::readOriginalSize(const QString& filename, int& w, int& h) {
                   strcasecmp(ext.c_str(), ".RW2") == 0 || strcasecmp(ext.c_str(), ".RAF") == 0);
 
     if (isRaw) {
+        std::lock_guard<std::mutex> rawLock(getLibRawMutex());
         libraw_data_t *lr = libraw_init(0);
         if (!lr) return false;
         
