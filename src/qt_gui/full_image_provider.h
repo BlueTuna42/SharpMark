@@ -287,7 +287,6 @@ private:
     }
 
     QImage loadRaw(const QString& filePath, int mode) {
-        std::lock_guard<std::mutex> rawLock(getLibRawMutex());
         LibRaw lr;
         lr.imgdata.params.use_camera_wb = 1;
 

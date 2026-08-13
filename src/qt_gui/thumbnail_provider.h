@@ -95,7 +95,6 @@ private:
     }
 
     QImage extractRawThumbnail(const QString &filePath) {
-        std::lock_guard<std::mutex> rawLock(getLibRawMutex());
         LibRaw rawProcessor;
         
         rawProcessor.imgdata.params.use_camera_wb = 1;

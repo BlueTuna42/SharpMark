@@ -476,8 +476,10 @@ QVariantMap AppBackend::getPhotoMetadata(const QString& rawPath) {
         lr.recycle();
     }
 
-    // 4. Analysis Data: Read from .laplacian_cache/state.csv
-    QFile csvFile(fileInfo.absolutePath() + "/.laplacian_cache/state.csv");
+    // 4. Analysis Data: Read from state.csv in centralized cache
+    std::filesystem::path folderCacheDir = CacheManager::getFolderCacheDir(fileInfo.absolutePath());
+    std::filesystem::path csvPath = folderCacheDir / "state.csv";
+    QFile csvFile(QString::fromStdWString(csvPath.wstring()));
     
     // Build formatted HTML output for the UI
     std::ostringstream finalHtml;
@@ -544,8 +546,7 @@ QVariantMap AppBackend::getPhotoMetadata(const QString& rawPath) {
     #else
         std::filesystem::path imgPath(cleanPath.toUtf8().constData());
     #endif
-    std::filesystem::path clipPath = imgPath.parent_path() / ".laplacian_cache" / (imgPath.filename().string());
-    clipPath += ".clip";
+    std::filesystem::path clipPath = CacheManager::getFolderCacheDir(cleanPath) / (imgPath.filename().string() + ".clip");
 
     if (std::filesystem::exists(clipPath)) {
         std::vector<float> clipVector(512);
@@ -793,7 +794,8 @@ void AppBackend::setPhotoRating(const QString& rawPath, int rating, float baseSc
 
     // Safe path construction for AI training
     QFileInfo fi(cleanPath);
-    QString clipPath = fi.absolutePath() + "/.laplacian_cache/" + fi.fileName() + ".clip";
+    std::filesystem::path folderCacheDir = CacheManager::getFolderCacheDir(fi.absolutePath());
+    QString clipPath = QString::fromStdWString((folderCacheDir / (fi.fileName().toStdString() + ".clip")).wstring());
 
     if (!QFileInfo::exists(clipPath)) {
         qWarning() << "AI Train: .clip vector NOT FOUND at" << clipPath;
@@ -1380,6 +1382,7 @@ void AppBackend::selectFolder(const QString &folderPath) {
     if (m_metaThread.joinable()) m_metaThread.join();
 
     m_currentFolder = cleanPath;
+    CacheManager::migrateLegacyCache(m_currentFolder);
     setStatusText("Selected " + m_currentFolder);
 
     // 1. FAST SCAN DIRECTORY IMMEDIATELY
@@ -1514,7 +1517,7 @@ void AppBackend::startScan() {
 void AppBackend::runScannerTask() {
     std::atomic<size_t> fileIndex{0};
     const unsigned int numThreads = std::thread::hardware_concurrency();
-    const unsigned int threadsToUse = (numThreads > 1) ? numThreads - 2 : 1;
+    const unsigned int threadsToUse = std::max(1u, numThreads);
     std::vector<std::thread> workers;
 
     for (unsigned int i = 0; i < threadsToUse; ++i) {
@@ -1538,7 +1541,7 @@ void AppBackend::runScannerTask() {
             ctx.filePath = std::filesystem::path(qFile.toUtf8().constData());
 #endif
             ctx.rawFilePath = qFile;
-            ctx.cacheDir = ctx.filePath.parent_path() / ".laplacian_cache";
+            ctx.cacheDir = CacheManager::getFolderCacheDir(m_currentFolder);
 
             ProcessingResult result = runner.run(ctx);
 
@@ -1826,4 +1829,22 @@ void AppBackend::setGroupBursts(bool group) {
         saveSettings();
         emit groupBurstsChanged();
     }
+}
+
+QVariantList AppBackend::getCachedFoldersList() const {
+    return CacheManager::getCachedFoldersList();
+}
+
+void AppBackend::deleteCacheFolders(const QStringList& hashes) {
+    for (const QString& h : hashes) {
+        CacheManager::deleteCacheFolder(h);
+    }
+}
+
+void AppBackend::clearAllCacheData() {
+    CacheManager::clearAllCache();
+}
+
+QString AppBackend::getTotalCacheSizeString() const {
+    return CacheManager::formatSize(CacheManager::getTotalCacheSizeBytes());
 }

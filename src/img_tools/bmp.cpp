@@ -33,46 +33,44 @@ std::unique_ptr<ImageBuffer> ImageIO::readImage(const QString& filename, int raw
                   strcasecmp(ext.c_str(), ".RW2") == 0 || strcasecmp(ext.c_str(), ".RAF") == 0);
 
     if (isRaw) {
-        std::lock_guard<std::mutex> rawLock(getLibRawMutex());
-        libraw_data_t *lr = libraw_init(0);
-        if (!lr) return nullptr;
+        LibRaw lr;
+        lr.imgdata.params.use_camera_wb = 1;
 
         int openResult = LIBRAW_SUCCESS;
 #ifdef _WIN32
-        openResult = libraw_open_wfile(lr, w_filename.c_str());
+        openResult = lr.open_file(w_filename.c_str());
 #else
-        openResult = libraw_open_file(lr, fs_path.c_str());
+        openResult = lr.open_file(fs_path.c_str());
 #endif
 
         if (openResult != LIBRAW_SUCCESS) {
-            libraw_close(lr);
             return nullptr;
         }
 
         libraw_processed_image_t *img = nullptr;
-    int err = 0;
+        int err = 0;
 
-    if (rawMode == 0) {
-        if (libraw_unpack_thumb(lr) == LIBRAW_SUCCESS) {
-            img = libraw_dcraw_make_mem_thumb(lr, &err);
-    
-            if (img && img->type == LIBRAW_IMAGE_JPEG) {
-                libraw_dcraw_clear_mem(img);
-                img = nullptr; 
+        if (rawMode == 0) {
+            if (lr.unpack_thumb() == LIBRAW_SUCCESS) {
+                img = lr.dcraw_make_mem_thumb(&err);
+                if (img && img->type == LIBRAW_IMAGE_JPEG) {
+                    LibRaw::dcraw_clear_mem(img);
+                    img = nullptr; 
+                }
             }
         }
-    }
 
-    if (!img) {
-        lr->params.half_size = (rawMode == 2) ? 0 : 1; 
-        
-        libraw_unpack(lr);
-        libraw_dcraw_process(lr);
-        img = libraw_dcraw_make_mem_image(lr, &err);
-    }
+        if (!img) {
+            lr.imgdata.params.half_size = (rawMode == 2) ? 0 : 1; 
+            if (lr.unpack() != LIBRAW_SUCCESS || lr.dcraw_process() != LIBRAW_SUCCESS) {
+                lr.recycle();
+                return nullptr;
+            }
+            img = lr.dcraw_make_mem_image(&err);
+        }
         
         if (!img) { 
-            libraw_close(lr); 
+            lr.recycle(); 
             return nullptr; 
         }
 
@@ -96,8 +94,8 @@ std::unique_ptr<ImageBuffer> ImageIO::readImage(const QString& filename, int raw
 
         process_chunk(0, total);
 
-        libraw_dcraw_clear_mem(img);
-        libraw_close(lr);
+        LibRaw::dcraw_clear_mem(img);
+        lr.recycle();
         return resultImg;
     } else {
         int w, h, c;
@@ -155,23 +153,20 @@ bool ImageIO::readOriginalSize(const QString& filename, int& w, int& h) {
                   strcasecmp(ext.c_str(), ".RW2") == 0 || strcasecmp(ext.c_str(), ".RAF") == 0);
 
     if (isRaw) {
-        std::lock_guard<std::mutex> rawLock(getLibRawMutex());
-        libraw_data_t *lr = libraw_init(0);
-        if (!lr) return false;
-        
+        LibRaw lr;
         int openResult = LIBRAW_SUCCESS;
 #ifdef _WIN32
-        openResult = libraw_open_wfile(lr, w_filename.c_str());
+        openResult = lr.open_file(w_filename.c_str());
 #else
-        openResult = libraw_open_file(lr, fs_path.c_str());
+        openResult = lr.open_file(fs_path.c_str());
 #endif
         if (openResult == LIBRAW_SUCCESS) {
-            w = lr->sizes.width;
-            h = lr->sizes.height;
-            libraw_close(lr);
+            w = lr.imgdata.sizes.width;
+            h = lr.imgdata.sizes.height;
+            lr.recycle();
             return true;
         }
-        libraw_close(lr);
+        lr.recycle();
     } else {
         int comp;
 #ifdef _WIN32

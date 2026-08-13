@@ -75,6 +75,7 @@ set(SOURCES
     src/img_tools/bmp.cpp
     src/tools/scan.cpp
     src/tools/XMP_tools.cpp
+    src/tools/cache_manager.cpp
     src/processors/aesthetic_processor.cpp
     src/gui/utils/path_utils.cpp
 )

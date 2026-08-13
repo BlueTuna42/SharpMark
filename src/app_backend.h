@@ -1,5 +1,6 @@
 #pragma once
 
+#include "tools/cache_manager.h"
 #include <QObject>
 #include <QImage>
 #include <QString>
@@ -646,6 +647,12 @@ public:
     Q_INVOKABLE void preloadViewerWindow(int currentIndex);
     Q_INVOKABLE void preloadImage(const QString& filePath);
     Q_INVOKABLE void clearViewerPreloadCache();
+
+    // Cache Management
+    Q_INVOKABLE QVariantList getCachedFoldersList() const;
+    Q_INVOKABLE void deleteCacheFolders(const QStringList& hashes);
+    Q_INVOKABLE void clearAllCacheData();
+    Q_INVOKABLE QString getTotalCacheSizeString() const;
 
     // External editor — open one or more files in the configured application
     Q_INVOKABLE void openInExternalEditor(const QStringList& filePaths);

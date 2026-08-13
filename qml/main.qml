@@ -753,8 +753,8 @@ property bool isGridView: true
         id: settingsPopup
         x: Math.round((parent.width - width) / 2)
         y: Math.round((parent.height - height) / 2)
-        width: 450
-        height: 350
+        width: 500
+        height: 480
         modal: true
         focus: true
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
@@ -774,8 +774,9 @@ property bool isGridView: true
 
             GridLayout {
                 columns: 2
-                rowSpacing: 15
+                rowSpacing: 12
                 columnSpacing: 15
+                Layout.fillWidth: true
 
                 Text { text: "Theme:"; color: textColor }
                 ComboBox {
@@ -845,10 +846,207 @@ property bool isGridView: true
                         Qt.openUrlExternally(folderUrl)
                     }
                 }
+
+                Text { text: "Disk Cache:"; color: textColor }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+                    Text {
+                        text: backend.getTotalCacheSizeString()
+                        color: textColor
+                        font.pixelSize: 13
+                    }
+                    StyledButton {
+                        text: "Manage Cache..."
+                        onClicked: {
+                            cacheManagerPopup.refreshCacheList()
+                            cacheManagerPopup.open()
+                        }
+                    }
+                }
             }
             Item { Layout.fillHeight: true }
 
             StyledButton { text: "OK"; Layout.alignment: Qt.AlignHCenter; onClicked: settingsPopup.close() }
+        }
+    }
+
+    Popup {
+        id: cacheManagerPopup
+        x: Math.round((parent.width - width) / 2)
+        y: Math.round((parent.height - height) / 2)
+        width: 720
+        height: 520
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+        background: Rectangle {
+            color: popupBg
+            radius: 8
+            border.color: popupBorder
+        }
+
+        ListModel {
+            id: cacheListModel
+        }
+
+        function refreshCacheList() {
+            cacheListModel.clear()
+            var list = backend.getCachedFoldersList()
+            for (var i = 0; i < list.length; i++) {
+                var item = list[i]
+                item.selected = false
+                cacheListModel.append(item)
+            }
+            cacheTotalSizeText.text = "Total Cache Size: " + backend.getTotalCacheSizeString()
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 20
+            spacing: 12
+
+            RowLayout {
+                Layout.fillWidth: true
+                Text { text: "Cache Manager"; color: textColor; font.pixelSize: 20; font.bold: true }
+                Item { Layout.fillWidth: true }
+                Text {
+                    id: cacheTotalSizeText
+                    text: "Total Cache Size: 0 B"
+                    color: isLight ? "#0066cc" : "#3a80d2"
+                    font.bold: true
+                    font.pixelSize: 13
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                height: 1
+                color: popupBorder
+            }
+
+            Text {
+                text: "Select cached directories to remove or clear all unnecessary scan cache:"
+                color: isLight ? "#666" : "#aaa"
+                font.pixelSize: 12
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                color: isLight ? "#f8f8f8" : "#1e1e1e"
+                border.color: popupBorder
+                radius: 6
+                clip: true
+
+                ListView {
+                    id: cacheListView
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    model: cacheListModel
+                    spacing: 6
+                    clip: true
+
+                    delegate: Rectangle {
+                        width: cacheListView.width - 24
+                        height: 54
+                        radius: 4
+                        color: isLight ? "#ffffff" : "#282828"
+                        border.color: model.selected ? "#0066cc" : popupBorder
+                        border.width: model.selected ? 2 : 1
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 10
+                            anchors.rightMargin: 12
+                            anchors.topMargin: 6
+                            anchors.bottomMargin: 6
+                            spacing: 12
+
+                            CheckBox {
+                                checked: model.selected
+                                onToggled: cacheListModel.setProperty(index, "selected", checked)
+                            }
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 2
+
+                                Text {
+                                    text: model.folderPath
+                                    color: textColor
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                    elide: Text.ElideMiddle
+                                    Layout.fillWidth: true
+                                }
+                                Text {
+                                    text: model.fileCount + " files • " + model.formattedSize + " • Last Scanned: " + model.lastScanned
+                                    color: isLight ? "#777" : "#aaa"
+                                    font.pixelSize: 11
+                                    Layout.fillWidth: true
+                                }
+                            }
+                        }
+                    }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "No cached directories found."
+                        color: isLight ? "#888" : "#666"
+                        font.pixelSize: 14
+                        visible: cacheListModel.count === 0
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                StyledButton {
+                    text: "Select All"
+                    onClicked: {
+                        for (var i = 0; i < cacheListModel.count; i++) {
+                            cacheListModel.setProperty(i, "selected", true)
+                        }
+                    }
+                }
+
+                StyledButton {
+                    text: "Deselect All"
+                    onClicked: {
+                        for (var i = 0; i < cacheListModel.count; i++) {
+                            cacheListModel.setProperty(i, "selected", false)
+                        }
+                    }
+                }
+
+                Item { Layout.fillWidth: true }
+
+                StyledButton {
+                    text: "Clear Selected"
+                    onClicked: {
+                        var hashes = []
+                        for (var i = 0; i < cacheListModel.count; i++) {
+                            if (cacheListModel.get(i).selected) {
+                                hashes.push(cacheListModel.get(i).hash)
+                            }
+                        }
+                        if (hashes.length > 0) {
+                            backend.deleteCacheFolders(hashes)
+                            cacheManagerPopup.refreshCacheList()
+                        }
+                    }
+                }
+
+                StyledButton {
+                    text: "Close"
+                    isPrimary: true
+                    onClicked: cacheManagerPopup.close()
+                }
+            }
         }
     }
     
