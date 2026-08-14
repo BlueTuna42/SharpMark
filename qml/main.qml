@@ -2331,8 +2331,11 @@ StyledButton {
                     anchors.fill: parent
                     model: backend.burstProxy
                     clip: true
-                    cellWidth: 220
-                    cellHeight: 260
+                    readonly property int minCellWidth: 200
+                    readonly property int availableWidth: Math.max(100, width - 12)
+                    readonly property int columns: Math.max(1, Math.floor(availableWidth / minCellWidth))
+                    cellWidth: Math.floor(availableWidth / columns)
+                    cellHeight: Math.round(cellWidth * 1.18)
                     cacheBuffer: 1300 // Constrain loaded preview window to displayed + approx +/-25 previews
                     visible: isGridView
 
@@ -2347,8 +2350,8 @@ StyledButton {
                     }
 
                     delegate: Item {
-                        width: 220  // Matches cellWidth
-                        height: 260 // Matches cellHeight
+                        width: mainGridView.cellWidth
+                        height: mainGridView.cellHeight
                         Component.onCompleted: if (model.filePath) backend.preloadImage(model.filePath)
 
                         readonly property int sourceRow: backend.burstProxy.mapToSourceRow(index)
@@ -2367,9 +2370,8 @@ StyledButton {
                         // --- THE ACTUAL CARD ---
                         Rectangle {
                             id: gridCard
-                            width: 200
-                            height: 240
-                            anchors.centerIn: parent // Centers the card inside the 220x260 cell
+                            anchors.fill: parent
+                            anchors.margins: 6
 
                             readonly property bool itemSelected: !!mainWindow.selectedPaths[model.filePath]
 
@@ -2405,11 +2407,11 @@ StyledButton {
                             ColumnLayout {
                                 anchors.fill: parent
                                 anchors.margins: 8
-                                spacing: 5
+                                spacing: 4
 
                                 Image {
                                     Layout.fillWidth: true
-                                    Layout.preferredHeight: 150
+                                    Layout.fillHeight: true
                                     source: "image://preview/" + model.filePath
                                     asynchronous: true
                                     autoTransform: true
@@ -2473,6 +2475,8 @@ StyledButton {
                                     color: model.status === "WAITING" ? cardWaitingText : (model.isRejected ? cardBlurryText : (backend.colorAiScore ? getScoreColor(parseFloat(model.score)) : textColor))
                                     font.bold: true
                                     font.pixelSize: 12
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideRight
                                 }
                             }
 
