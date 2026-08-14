@@ -853,6 +853,14 @@ property bool isGridView: true
                     Layout.fillWidth: true
                 }
 
+                Text { text: "Delete Action:"; color: textColor }
+                ComboBox {
+                    model: ["Move to Trash", "Move to '_Rejected' Folder", "Delete Permanently"]
+                    currentIndex: backend.deleteMode
+                    onActivated: backend.deleteMode = currentIndex
+                    Layout.fillWidth: true
+                }
+
                 Text { text: "Debug log:"; color: textColor }
                 StyledButton {
                     text: "Open Log Location"
@@ -1068,38 +1076,46 @@ property bool isGridView: true
     
     MessageDialog {
         id: trashConfirmDialog
-        title: "Move to Trash"
-        text: "Are you sure you want to move this photo to the system Trash?"
+        title: backend.deleteMode === 1 ? "Move to '_Rejected' Folder" : (backend.deleteMode === 2 ? "Delete Permanently" : "Move to Trash")
+        text: backend.deleteMode === 1 ? "Are you sure you want to move this photo to the '_Rejected' folder?" : (backend.deleteMode === 2 ? "Are you sure you want to permanently delete this photo?" : "Are you sure you want to move this photo to the system Trash?")
         buttons: MessageDialog.Yes | MessageDialog.No
         
-        property int targetIndex: -1
+        property int targetProxyIndex: -1
+
+        function openForProxyIndex(proxyIdx) {
+            targetProxyIndex = proxyIdx;
+            open();
+        }
         
         onButtonClicked: function(button, role) {
-            if (button === MessageDialog.Yes && targetIndex !== -1) {
-                let file = resultsModel.get(targetIndex).filePath;
-                if (backend.trashFile(file)) {
-                    resultsModel.remove(targetIndex);
-                    
-                    if (resultsModel.count === 0) {
-                        viewerWindow.close();
-                    } else {
-                        if (targetIndex >= resultsModel.count) {
-                            viewerWindow.currentIndex = resultsModel.count - 1;
+            if (button === MessageDialog.Yes && targetProxyIndex !== -1) {
+                let sourceIndex = backend.burstProxy.mapToSourceRow(targetProxyIndex);
+                if (sourceIndex >= 0 && sourceIndex < resultsModel.count) {
+                    let file = resultsModel.get(sourceIndex).filePath;
+                    if (backend.trashFile(file)) {
+                        resultsModel.remove(sourceIndex);
+                        
+                        if (backend.burstProxy.count === 0) {
+                            viewerWindow.close();
                         } else {
-                            let temp = targetIndex;
-                            viewerWindow.currentIndex = -1;
-                            viewerWindow.currentIndex = temp;
+                            if (targetProxyIndex >= backend.burstProxy.count) {
+                                viewerWindow.currentIndex = backend.burstProxy.count - 1;
+                            } else {
+                                let temp = targetProxyIndex;
+                                viewerWindow.currentIndex = -1;
+                                viewerWindow.currentIndex = temp;
+                            }
                         }
                     }
                 }
             }
-            targetIndex = -1;
+            targetProxyIndex = -1;
         }
     }
 
     MessageDialog {
         id: trashMultiConfirmDialog
-        title: "Move to Trash"
+        title: backend.deleteMode === 1 ? "Move to '_Rejected' Folder" : (backend.deleteMode === 2 ? "Delete Permanently" : "Move to Trash")
         buttons: MessageDialog.Yes | MessageDialog.No
 
         property var pathsToTrash: []
@@ -1107,18 +1123,17 @@ property bool isGridView: true
         function openForSelection() {
             pathsToTrash = Object.keys(mainWindow.selectedPaths)
             var n = pathsToTrash.length
-            text = "Are you sure you want to move " + n + " selected photo" + (n !== 1 ? "s" : "") + " to the system Trash?"
+            var actionText = backend.deleteMode === 1 ? "move " + n + " selected photo" + (n !== 1 ? "s" : "") + " to the '_Rejected' folder" : (backend.deleteMode === 2 ? "permanently delete " + n + " selected photo" + (n !== 1 ? "s" : "") : "move " + n + " selected photo" + (n !== 1 ? "s" : "") + " to the system Trash");
+            text = "Are you sure you want to " + actionText + "?"
             open()
         }
 
         onButtonClicked: function(button, role) {
             if (button === MessageDialog.Yes) {
-                // Collect source indices to remove (must map through proxy)
                 var indicesToRemove = []
                 for (var i = 0; i < pathsToTrash.length; i++) {
                     var fp = pathsToTrash[i]
                     backend.trashFile(fp)
-                    // Find the source index in resultsModel
                     for (var j = 0; j < resultsModel.count; j++) {
                         if (resultsModel.get(j).filePath === fp) {
                             indicesToRemove.push(j)
@@ -1126,13 +1141,12 @@ property bool isGridView: true
                         }
                     }
                 }
-                // Remove in reverse order so indices stay valid
                 indicesToRemove.sort(function(a, b) { return b - a })
                 for (var k = 0; k < indicesToRemove.length; k++) {
                     resultsModel.remove(indicesToRemove[k])
                 }
                 mainWindow.clearSelection()
-                if (resultsModel.count === 0) {
+                if (backend.burstProxy.count === 0) {
                     viewerWindow.close()
                 }
             }
@@ -1450,8 +1464,7 @@ property bool isGridView: true
             sequence: "Delete"
             enabled: viewerWindow.visible
             onActivated: {
-                trashConfirmDialog.targetIndex = viewerWindow.currentIndex;
-                trashConfirmDialog.open();
+                trashConfirmDialog.openForProxyIndex(viewerWindow.currentIndex);
             }
         }
     }
@@ -2250,7 +2263,7 @@ StyledButton {
 
                     Button {
                         id: deleteSelectedBtn
-                        text: "Move to Trash"
+                        text: backend.deleteMode === 1 ? "Move to _Rejected" : (backend.deleteMode === 2 ? "Delete Permanently" : "Move to Trash")
                         hoverEnabled: true
                         onClicked: trashMultiConfirmDialog.openForSelection()
 

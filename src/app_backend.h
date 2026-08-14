@@ -543,6 +543,7 @@ class AppBackend : public QObject {
     Q_PROPERTY(int rawAnalysisMode READ rawAnalysisMode WRITE setRawAnalysisMode NOTIFY rawAnalysisModeChanged)
     Q_PROPERTY(QString histogramBase64 READ histogramBase64 NOTIFY histogramUpdated)
     Q_PROPERTY(bool groupBursts READ groupBursts WRITE setGroupBursts NOTIFY groupBurstsChanged)
+    Q_PROPERTY(int deleteMode READ deleteMode WRITE setDeleteMode NOTIFY deleteModeChanged)
 
     // LUT properties
     Q_PROPERTY(bool lutEnabled READ lutEnabled WRITE setLutEnabled NOTIFY lutEnabledChanged)
@@ -671,6 +672,9 @@ public:
     bool groupBursts() const { return m_groupBursts; }
     void setGroupBursts(bool group);
 
+    int deleteMode() const { return m_deleteMode; }
+    void setDeleteMode(int mode);
+
     Q_PROPERTY(PipelineConfigModel* pipelineModel READ pipelineModel CONSTANT)
     PipelineConfigModel* pipelineModel() { return &m_pipelineModel; }
 
@@ -709,6 +713,7 @@ signals:
     void applyUserBiasChanged();
 
     void groupBurstsChanged();
+    void deleteModeChanged();
 
     void lutEnabledChanged();
     void activeLutChanged();
@@ -754,6 +759,7 @@ private:
     int m_rawAnalysisMode = 0;
 
     bool m_groupBursts = true;
+    int m_deleteMode = 0; // 0: Trash, 1: _Rejected folder, 2: Permanently delete
     BurstFilterProxyModel m_burstProxy;
     FullImageProvider* m_fullImageProvider = nullptr;
 

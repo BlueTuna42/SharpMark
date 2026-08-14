@@ -943,6 +943,7 @@ void AppBackend::loadSettings() {
             else if (key == "rawViewMode") m_rawViewMode = value.toInt();
             else if (key == "rawAnalysisMode") m_rawAnalysisMode = value.toInt();
             else if (key == "groupBursts") m_groupBursts = (value == "1");
+            else if (key == "deleteMode")  m_deleteMode = value.toInt();
             else if (key == "lutEnabled") m_lutEnabled = (value == "1");
             else if (key == "lutPreset")  m_activeLutName = value.trimmed();
             else if (key.startsWith("pipeline_settings_") || key.startsWith("preprocessor_settings_") || key.startsWith("postprocessor_settings_")) {
@@ -1121,6 +1122,7 @@ void AppBackend::saveSettings() {
     out << "rawViewMode="         << m_rawViewMode                 << "\n";
     out << "rawAnalysisMode="<< m_rawAnalysisMode             << "\n";
     out << "groupBursts="    << (m_groupBursts ? 1 : 0)      << "\n";
+    out << "deleteMode="     << m_deleteMode                 << "\n";
     out << "lutEnabled="     << (m_lutEnabled ? 1 : 0)       << "\n";
     out << "lutPreset="      << m_activeLutName               << "\n";
 
@@ -1818,7 +1820,65 @@ void AppBackend::cancelScan() {
 }
 
 bool AppBackend::trashFile(const QString &filePath) {
-    return QFile::moveToTrash(filePath);
+    QFileInfo fi(filePath);
+    if (!fi.exists()) return false;
+
+    if (m_deleteMode == 1) {
+        // Mode 1: Move to "_Rejected" subfolder inside the file's directory
+        QDir parentDir = fi.dir();
+        QString rejectedDirPath = parentDir.filePath("_Rejected");
+        if (!QDir(rejectedDirPath).exists()) {
+            parentDir.mkdir("_Rejected");
+        }
+        QString targetPath = QDir(rejectedDirPath).filePath(fi.fileName());
+        if (QFile::exists(targetPath)) {
+            QFile::remove(targetPath);
+        }
+        bool ok = QFile::rename(filePath, targetPath);
+        if (!ok) {
+            if (QFile::copy(filePath, targetPath)) {
+                QFile::remove(filePath);
+                ok = true;
+            }
+        }
+
+        // Also move matching .xmp sidecar if present
+        QString xmpPath = parentDir.filePath(fi.completeBaseName() + ".xmp");
+        if (QFile::exists(xmpPath)) {
+            QString targetXmp = QDir(rejectedDirPath).filePath(fi.completeBaseName() + ".xmp");
+            if (QFile::exists(targetXmp)) QFile::remove(targetXmp);
+            if (!QFile::rename(xmpPath, targetXmp)) {
+                if (QFile::copy(xmpPath, targetXmp)) {
+                    QFile::remove(xmpPath);
+                }
+            }
+        }
+        return ok;
+    } else if (m_deleteMode == 2) {
+        // Mode 2: Delete permanently
+        bool ok = QFile::remove(filePath);
+        QString xmpPath = fi.dir().filePath(fi.completeBaseName() + ".xmp");
+        if (QFile::exists(xmpPath)) {
+            QFile::remove(xmpPath);
+        }
+        return ok;
+    } else {
+        // Mode 0: Move to System Trash
+        bool ok = QFile::moveToTrash(filePath);
+        QString xmpPath = fi.dir().filePath(fi.completeBaseName() + ".xmp");
+        if (QFile::exists(xmpPath)) {
+            QFile::moveToTrash(xmpPath);
+        }
+        return ok;
+    }
+}
+
+void AppBackend::setDeleteMode(int mode) {
+    if (m_deleteMode != mode) {
+        m_deleteMode = mode;
+        saveSettings();
+        emit deleteModeChanged();
+    }
 }
 
 QString AppBackend::logFilePath() const {
