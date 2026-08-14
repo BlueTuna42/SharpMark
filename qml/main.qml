@@ -136,12 +136,26 @@ property bool isGridView: true
 
     function toggleGroupExpansion(proxyIndex) {
         let sourceIndex = backend.burstProxy.mapToSourceRow(proxyIndex)
-        let expandedState = !resultsModel.get(sourceIndex).isExpanded
-        resultsModel.setProperty(sourceIndex, "isExpanded", expandedState)
+        if (sourceIndex < 0 || sourceIndex >= resultsModel.count) return;
+        let targetLeadIndex = backend.groupLead(sourceIndex);
         
-        for (let i = sourceIndex + 1; i < resultsModel.count; i++) {
-            if (resultsModel.get(i).isLead) break;
-            resultsModel.setProperty(i, "isExpanded", expandedState)
+        let activeView = isGridView ? mainGridView : mainListView;
+        let savedContentY = activeView ? activeView.contentY : 0;
+        
+        backend.toggleGroupExpansion(targetLeadIndex);
+        let expandedState = backend.isGroupExpanded(targetLeadIndex);
+        for (let i = 0; i < resultsModel.count; i++) {
+            if (backend.groupLead(i) === targetLeadIndex) {
+                resultsModel.setProperty(i, "isExpanded", expandedState);
+            }
+        }
+        
+        if (activeView) {
+            Qt.callLater(() => {
+                if (activeView) {
+                    activeView.contentY = Math.max(0, Math.min(savedContentY, activeView.contentHeight - activeView.height));
+                }
+            });
         }
     }
 
@@ -386,6 +400,7 @@ property bool isGridView: true
                 score: "0.00",
                 status: "WAITING",
                 isLead: true,  
+                leadIndex: index,
                 groupCount: 1,
                 isExpanded: false,
                 colorLabel: "",
@@ -413,6 +428,7 @@ property bool isGridView: true
         function onGroupAssigned(index, leadIndex, isLead, groupSize) {
             if (index >= 0 && index < resultsModel.count) {
                 resultsModel.setProperty(index, "isLead", isLead)
+                resultsModel.setProperty(index, "leadIndex", leadIndex)
                 resultsModel.setProperty(index, "groupCount", groupSize)
             }
         }
@@ -2003,7 +2019,7 @@ StyledButton {
                 StyledComboBox {
                     Layout.fillWidth: true
                     Layout.minimumWidth: 140
-                    model: ["Default", "Best First", "Worst First", "Rating (High → Low)", "Rating (Low → High)", "Color Rating"]
+                    model: ["Default", "Best First", "Worst First"]
                     currentIndex: backend.burstProxy.sortMode
                     onActivated: backend.burstProxy.sortMode = currentIndex
                 }
@@ -2311,6 +2327,7 @@ StyledButton {
                 Layout.fillHeight: true
 
                 GridView {
+                    id: mainGridView
                     anchors.fill: parent
                     model: backend.burstProxy
                     clip: true
@@ -2334,12 +2351,17 @@ StyledButton {
                         height: 260 // Matches cellHeight
                         Component.onCompleted: if (model.filePath) backend.preloadImage(model.filePath)
 
+                        readonly property int sourceRow: backend.burstProxy.mapToSourceRow(index)
+                        readonly property int currentLead: backend.groupLead(sourceRow)
+                        readonly property int prevLead: (index > 0) ? backend.groupLead(backend.burstProxy.mapToSourceRow(index - 1)) : -1
+                        readonly property bool isFirstInGroup: (index === 0 || prevLead !== currentLead)
+                        readonly property int groupSize: backend.groupSize(currentLead)
+
                         // --- THE SEAMLESS BATCH FRAME ---
                         Rectangle {
                             anchors.fill: parent
-                            // A soft blue background to group them
                             color: isLight ? "#d0e8ff" : "#004191" 
-                            visible: mainWindow.groupBursts && model.isExpanded && model.groupCount > 1
+                            visible: mainWindow.groupBursts && model.isExpanded && groupSize > 1
                         }
 
                         // --- THE ACTUAL CARD ---
@@ -2460,7 +2482,7 @@ StyledButton {
 
                             // BADGE
                             Rectangle {
-                                visible: mainWindow.groupBursts && model.isLead && model.groupCount > 1
+                                visible: mainWindow.groupBursts && groupSize > 1 && isFirstInGroup
                                 anchors.top: parent.top
                                 anchors.right: parent.right
                                 anchors.margins: 8
@@ -2474,7 +2496,7 @@ StyledButton {
 
                                 Text {
                                     anchors.centerIn: parent
-                                    text: model.isExpanded ? "<" : ("+" + (model.groupCount - 1))
+                                    text: model.isExpanded ? "<" : ("+" + (groupSize - 1))
                                     color: "white"
                                     font.bold: true
                                     font.pixelSize: 14
@@ -2507,6 +2529,7 @@ StyledButton {
                 }
 
                 ListView {
+                    id: mainListView
                     anchors.fill: parent
                     model: backend.burstProxy
                     clip: true
@@ -2529,11 +2552,17 @@ StyledButton {
                         height: 68 // 60 for the card + 8 for spacing
                         Component.onCompleted: if (model.filePath) backend.preloadImage(model.filePath)
 
+                        readonly property int sourceRow: backend.burstProxy.mapToSourceRow(index)
+                        readonly property int currentLead: backend.groupLead(sourceRow)
+                        readonly property int prevLead: (index > 0) ? backend.groupLead(backend.burstProxy.mapToSourceRow(index - 1)) : -1
+                        readonly property bool isFirstInGroup: (index === 0 || prevLead !== currentLead)
+                        readonly property int groupSize: backend.groupSize(currentLead)
+
                         // --- THE SEAMLESS BATCH FRAME ---
                         Rectangle {
                             anchors.fill: parent
                             color: isLight ? "#d0e8ff" : "#004191"
-                            visible: mainWindow.groupBursts && model.isExpanded && model.groupCount > 1
+                            visible: mainWindow.groupBursts && model.isExpanded && groupSize > 1
                         }
 
                         // --- THE ACTUAL CARD ---
@@ -2594,6 +2623,33 @@ StyledButton {
                                     font.pixelSize: 14
                                     Layout.fillWidth: true
                                     elide: Text.ElideRight
+                                }
+
+                                // BURST BADGE
+                                Rectangle {
+                                    visible: mainWindow.groupBursts && groupSize > 1 && isFirstInGroup
+                                    Layout.alignment: Qt.AlignVCenter
+                                    width: 28
+                                    height: 28
+                                    radius: 14
+                                    color: "#0066cc"
+                                    border.color: "#ffffff"
+                                    border.width: 1.5
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: model.isExpanded ? "<" : ("+" + (groupSize - 1))
+                                        color: "white"
+                                        font.bold: true
+                                        font.pixelSize: 12
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        preventStealing: true
+                                        propagateComposedEvents: false
+                                        onClicked: mainWindow.toggleGroupExpansion(index)
+                                    }
                                 }
 
                                 // STAR RATING & COLOR LABEL CONTAINER

@@ -139,6 +139,7 @@ PipelineRunner AppBackend::createPipeline() {
 
 AppBackend::AppBackend(QObject *parent)
     : QObject(parent), m_statusText("Ready") {
+    m_burstProxy.setBackend(this);
     connect(&m_pipelineModel,      &PipelineConfigModel::pipelineChanged,
             this, [this]() {
                 if (!m_loadingSettings) {
@@ -1403,6 +1404,13 @@ void AppBackend::selectFolder(const QString &folderPath) {
     m_hashes.assign(m_files.size(), 0);
     m_clipVectors.assign(m_files.size(), {});
     m_aestheticScores.assign(m_files.size(), 0.0f);
+    m_groupLead.resize(m_files.size());
+    m_groupSize.assign(m_files.size(), 1);
+    m_isExpanded.assign(m_files.size(), false);
+    for (size_t i = 0; i < m_files.size(); ++i) {
+        m_groupLead[i] = static_cast<int>(i);
+    }
+    m_burstProxy.invalidateFilterAndSort();
     // Clear in-session caches so stale values from a previous folder don't bleed in
     m_ratings.clear();
     m_colorLabels.clear();
@@ -1793,6 +1801,13 @@ void AppBackend::runScannerTask() {
         }
     }
 
+    m_groupLead = groupLead;
+    m_groupSize = groupSize;
+    m_isExpanded.assign(m_files.size(), false);
+    QMetaObject::invokeMethod(this, [this]() {
+        m_burstProxy.invalidateFilterAndSort();
+    }, Qt::QueuedConnection);
+
     m_isScanning = false;
     setStatusText(m_cancelRequested ? "Cancelled" : "Finished");
     emit scanFinished();
@@ -1840,6 +1855,7 @@ void AppBackend::setGroupBursts(bool group) {
     if (m_groupBursts != group) {
         m_groupBursts = group;
         saveSettings();
+        m_burstProxy.invalidateFilterAndSort();
         emit groupBurstsChanged();
     }
 }
@@ -1860,4 +1876,178 @@ void AppBackend::clearAllCacheData() {
 
 QString AppBackend::getTotalCacheSizeString() const {
     return CacheManager::formatSize(CacheManager::getTotalCacheSizeBytes());
+}
+
+// ── BurstFilterProxyModel Implementation ─────────────────────────────────────
+
+void BurstFilterProxyModel::rebuildGroupCache() const {
+    m_groupCache.clear();
+    m_cacheValid = true;
+
+    if (!sourceModel() || !m_backend) return;
+
+    int totalRows = sourceModel()->rowCount();
+    if (totalRows == 0) return;
+
+    for (int row = 0; row < totalRows; ++row) {
+        int lead = m_backend->groupLead(row);
+        float score = m_backend->photoScore(row);
+        bool isExpanded = m_backend->isGroupExpanded(lead);
+
+        auto it = m_groupCache.find(lead);
+        if (it == m_groupCache.end()) {
+            GroupSummary g;
+            g.leadIndex = lead;
+            g.bestRow = row;
+            g.worstRow = row;
+            g.maxScore = score;
+            g.minScore = score;
+            g.count = 1;
+            g.isExpanded = isExpanded;
+            m_groupCache[lead] = g;
+        } else {
+            GroupSummary& g = it->second;
+            g.count++;
+            if (isExpanded) g.isExpanded = true;
+            if (score > g.maxScore) {
+                g.maxScore = score;
+                g.bestRow = row;
+            }
+            if (score < g.minScore) {
+                g.minScore = score;
+                g.worstRow = row;
+            }
+        }
+    }
+}
+
+bool BurstFilterProxyModel::compareGroups(int leadA, int leadB) const {
+    if (leadA == leadB) return false;
+
+    auto itA = m_groupCache.find(leadA);
+    auto itB = m_groupCache.find(leadB);
+    if (itA == m_groupCache.end() || itB == m_groupCache.end()) {
+        return leadA < leadB;
+    }
+
+    const GroupSummary& gA = itA->second;
+    const GroupSummary& gB = itB->second;
+
+    if (m_sortMode == SortBestFirst) {
+        if (!qFuzzyCompare(gA.maxScore, gB.maxScore)) {
+            return gA.maxScore > gB.maxScore; // Group with higher best score comes first
+        }
+        return leadA < leadB;
+    }
+
+    if (m_sortMode == SortWorstFirst) {
+        if (!qFuzzyCompare(gA.minScore, gB.minScore)) {
+            return gA.minScore < gB.minScore; // Group with lower worst score comes first
+        }
+        return leadA < leadB;
+    }
+
+    return leadA < leadB;
+}
+
+bool BurstFilterProxyModel::compareItemsWithinGroup(int rowA, int rowB) const {
+    if (rowA == rowB) return false;
+    if (!m_backend) return rowA < rowB;
+
+    if (m_sortMode == SortBestFirst) {
+        float scoreA = m_backend->photoScore(rowA);
+        float scoreB = m_backend->photoScore(rowB);
+        if (!qFuzzyCompare(scoreA, scoreB)) {
+            return scoreA > scoreB; // Higher score first within group
+        }
+        return rowA < rowB;
+    }
+
+    if (m_sortMode == SortWorstFirst) {
+        float scoreA = m_backend->photoScore(rowA);
+        float scoreB = m_backend->photoScore(rowB);
+        if (!qFuzzyCompare(scoreA, scoreB)) {
+            return scoreA < scoreB; // Lower score first within group
+        }
+        return rowA < rowB;
+    }
+
+    return rowA < rowB;
+}
+
+bool BurstFilterProxyModel::filterAcceptsRow(int source_row, const QModelIndex& source_parent) const {
+    QModelIndex idx = sourceModel()->index(source_row, 0, source_parent);
+
+    // ── Color label filter ───────────────────────────────────────────────
+    if (!m_colorLabelFilter.isEmpty()) {
+        if (m_colorLabelRole == -1) m_colorLabelRole = roleNames().key("colorLabel", -1);
+        QString rowLabel = (m_colorLabelRole != -1)
+                           ? sourceModel()->data(idx, m_colorLabelRole).toString()
+                           : QString();
+        if (rowLabel != m_colorLabelFilter) return false;
+    }
+
+    // ── Rating filter ────────────────────────────────────────────────────
+    if (m_ratingFilter > 0) {
+        if (m_ratingRole == -1) m_ratingRole = roleNames().key("rating", -1);
+        int rowRating = (m_ratingRole != -1)
+                        ? sourceModel()->data(idx, m_ratingRole).toInt()
+                        : 0;
+        if (rowRating != m_ratingFilter) return false;
+    }
+
+    // ── Burst group filter ───────────────────────────────────────────────
+    if (!m_groupBursts || !m_backend) return true;
+
+    int lead = m_backend->groupLead(source_row);
+    int gSize = m_backend->groupSize(lead);
+    if (gSize <= 1) return true;
+
+    bool isExpanded = m_backend->isGroupExpanded(lead);
+    if (isExpanded) {
+        return true;
+    }
+
+    if (m_sortMode == SortDefault) {
+        return (source_row == lead);
+    }
+
+    if (!m_cacheValid) {
+        rebuildGroupCache();
+    }
+
+    auto it = m_groupCache.find(lead);
+    if (it != m_groupCache.end()) {
+        if (m_sortMode == SortBestFirst) {
+            return (source_row == it->second.bestRow);
+        }
+        if (m_sortMode == SortWorstFirst) {
+            return (source_row == it->second.worstRow);
+        }
+    }
+
+    return (source_row == lead);
+}
+
+bool BurstFilterProxyModel::lessThan(const QModelIndex &source_left, const QModelIndex &source_right) const {
+    int rowL = source_left.row();
+    int rowR = source_right.row();
+    if (rowL == rowR) return false;
+
+    if (m_sortMode == SortDefault || !m_backend) {
+        return rowL < rowR;
+    }
+
+    if (!m_cacheValid) {
+        rebuildGroupCache();
+    }
+
+    int leadL = m_backend->groupLead(rowL);
+    int leadR = m_backend->groupLead(rowR);
+
+    if (m_groupBursts && leadL != leadR) {
+        return compareGroups(leadL, leadR);
+    }
+
+    return compareItemsWithinGroup(rowL, rowR);
 }

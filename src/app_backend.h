@@ -361,6 +361,8 @@ private:
 };
 
 
+class AppBackend;
+
 class BurstFilterProxyModel : public QSortFilterProxyModel {
     Q_OBJECT
     Q_PROPERTY(QObject* source READ source WRITE setSource NOTIFY sourceChanged)
@@ -373,16 +375,17 @@ class BurstFilterProxyModel : public QSortFilterProxyModel {
 public:
     enum SortMode {
         SortDefault = 0,
-        SortBestFirst,
-        SortWorstFirst,
-        SortRatingHigh,
-        SortRatingLow,
-        SortColorLabel
+        SortBestFirst = 1,
+        SortWorstFirst = 2
     };
     Q_ENUM(SortMode)
 
     explicit BurstFilterProxyModel(QObject* parent = nullptr) : QSortFilterProxyModel(parent) {
         setDynamicSortFilter(true);
+    }
+
+    void setBackend(AppBackend* backend) {
+        m_backend = backend;
     }
 
     QObject* source() const { return m_source; }
@@ -393,8 +396,12 @@ public:
             if (sourceModel()) {
                 connect(sourceModel(), &QAbstractItemModel::rowsInserted, this, [this](){ emit countChanged(); });
                 connect(sourceModel(), &QAbstractItemModel::rowsRemoved, this, [this](){ emit countChanged(); });
-                connect(sourceModel(), &QAbstractItemModel::modelReset, this, [this](){ emit countChanged(); });
+                connect(sourceModel(), &QAbstractItemModel::modelReset, this, [this](){
+                    m_cacheValid = false;
+                    emit countChanged();
+                });
             }
+            m_cacheValid = false;
             emit sourceChanged();
             emit countChanged();
         }
@@ -404,7 +411,8 @@ public:
     void setGroupBursts(bool group) {
         if (m_groupBursts != group) {
             m_groupBursts = group;
-            invalidateFilter();
+            m_cacheValid = false;
+            invalidate();
             emit groupBurstsChanged();
             emit countChanged();
         }
@@ -429,18 +437,14 @@ public:
         return mapToSource(index(proxyRow, 0)).row();
     }
 
-     SortMode sortMode() const { return m_sortMode; }
+    SortMode sortMode() const { return m_sortMode; }
     
     void setSortMode(SortMode mode) {
         if (m_sortMode != mode) {
             m_sortMode = mode;
-            Qt::SortOrder order = Qt::AscendingOrder;
-            if (m_sortMode == SortBestFirst || m_sortMode == SortRatingHigh) {
-                order = Qt::DescendingOrder;
-            } else {
-                order = Qt::AscendingOrder;
-            }
-            sort(0, order);
+            m_cacheValid = false;
+            invalidate();
+            sort(0, Qt::AscendingOrder);
             emit sortModeChanged();
         }
     }
@@ -465,109 +469,34 @@ public:
         }
     }
 
+    void invalidateFilterAndSort() {
+        m_cacheValid = false;
+        invalidate();
+        emit countChanged();
+    }
+
+    void invalidateFilterOnly() {
+        invalidateFilter();
+        emit countChanged();
+    }
+
 protected:
-    bool filterAcceptsRow(int source_row, const QModelIndex& source_parent) const override {
-        QModelIndex idx = sourceModel()->index(source_row, 0, source_parent);
+    struct GroupSummary {
+        int leadIndex = -1;
+        int bestRow = -1;
+        int worstRow = -1;
+        float maxScore = -1.0f;
+        float minScore = 999.0f;
+        int count = 1;
+        bool isExpanded = false;
+    };
 
-        // ── Color label filter ───────────────────────────────────────────────
-        if (!m_colorLabelFilter.isEmpty()) {
-            if (m_colorLabelRole == -1) m_colorLabelRole = roleNames().key("colorLabel", -1);
-            QString rowLabel = (m_colorLabelRole != -1)
-                               ? sourceModel()->data(idx, m_colorLabelRole).toString()
-                               : QString();
-            if (rowLabel != m_colorLabelFilter) return false;
-        }
+    void rebuildGroupCache() const;
+    bool compareGroups(int leadA, int leadB) const;
+    bool compareItemsWithinGroup(int rowA, int rowB) const;
 
-        // ── Rating filter ────────────────────────────────────────────────────
-        if (m_ratingFilter > 0) {
-            if (m_ratingRole == -1) m_ratingRole = roleNames().key("rating", -1);
-            int rowRating = (m_ratingRole != -1)
-                            ? sourceModel()->data(idx, m_ratingRole).toInt()
-                            : 0;
-            if (rowRating != m_ratingFilter) return false;
-        }
-
-        // ── Burst group filter ───────────────────────────────────────────────
-        if (!m_groupBursts) return true;
-
-        if (m_isLeadRole == -1)     m_isLeadRole     = roleNames().key("isLead",     -1);
-        if (m_isExpandedRole == -1) m_isExpandedRole = roleNames().key("isExpanded", -1);
-
-        bool isLead     = (m_isLeadRole     != -1) ? sourceModel()->data(idx, m_isLeadRole).toBool()     : true;
-        bool isExpanded = (m_isExpandedRole != -1) ? sourceModel()->data(idx, m_isExpandedRole).toBool() : true;
-
-        return isLead || isExpanded;
-    }
-
-    bool lessThan(const QModelIndex &source_left, const QModelIndex &source_right) const override {
-        if (m_sortMode == SortDefault) {
-            return source_left.row() < source_right.row();
-        }
-
-        if (m_sortMode == SortBestFirst || m_sortMode == SortWorstFirst) {
-            if (m_scoreRole == -1) m_scoreRole = roleNames().key("score", -1);
-            float scoreL = 0.0f;
-            float scoreR = 0.0f;
-            if (m_scoreRole != -1) {
-                scoreL = sourceModel()->data(source_left, m_scoreRole).toFloat();
-                scoreR = sourceModel()->data(source_right, m_scoreRole).toFloat();
-            }
-            if (qFuzzyCompare(scoreL, scoreR)) {
-                return source_left.row() < source_right.row();
-            }
-            return scoreL < scoreR;
-        }
-
-        if (m_sortMode == SortRatingHigh || m_sortMode == SortRatingLow) {
-            if (m_ratingRole == -1) m_ratingRole = roleNames().key("rating", -1);
-            int ratingL = 0;
-            int ratingR = 0;
-            if (m_ratingRole != -1) {
-                ratingL = sourceModel()->data(source_left, m_ratingRole).toInt();
-                ratingR = sourceModel()->data(source_right, m_ratingRole).toInt();
-            }
-            if (ratingL != ratingR) {
-                return ratingL < ratingR;
-            }
-            if (m_scoreRole == -1) m_scoreRole = roleNames().key("score", -1);
-            float scoreL = (m_scoreRole != -1) ? sourceModel()->data(source_left, m_scoreRole).toFloat() : 0.0f;
-            float scoreR = (m_scoreRole != -1) ? sourceModel()->data(source_right, m_scoreRole).toFloat() : 0.0f;
-            if (!qFuzzyCompare(scoreL, scoreR)) {
-                return scoreL < scoreR;
-            }
-            return source_left.row() < source_right.row();
-        }
-
-        if (m_sortMode == SortColorLabel) {
-            if (m_colorLabelRole == -1) m_colorLabelRole = roleNames().key("colorLabel", -1);
-            QString labelL = (m_colorLabelRole != -1) ? sourceModel()->data(source_left, m_colorLabelRole).toString() : QString();
-            QString labelR = (m_colorLabelRole != -1) ? sourceModel()->data(source_right, m_colorLabelRole).toString() : QString();
-
-            auto colorRank = [](const QString& lbl) -> int {
-                if (lbl == "Red")    return 1;
-                if (lbl == "Yellow") return 2;
-                if (lbl == "Green")  return 3;
-                if (lbl == "Blue")   return 4;
-                if (lbl == "Purple") return 5;
-                return 6;
-            };
-
-            int rankL = colorRank(labelL);
-            int rankR = colorRank(labelR);
-            if (rankL != rankR) {
-                return rankL < rankR;
-            }
-            if (m_ratingRole == -1) m_ratingRole = roleNames().key("rating", -1);
-            int ratingL = (m_ratingRole != -1) ? sourceModel()->data(source_left, m_ratingRole).toInt() : 0;
-            int ratingR = (m_ratingRole != -1) ? sourceModel()->data(source_right, m_ratingRole).toInt() : 0;
-            if (ratingL != ratingR) {
-                return ratingL > ratingR;
-            }
-            return source_left.row() < source_right.row();
-        }
-
-        return source_left.row() < source_right.row();
-    }
+    bool filterAcceptsRow(int source_row, const QModelIndex& source_parent) const override;
+    bool lessThan(const QModelIndex &source_left, const QModelIndex &source_right) const override;
 
 signals:
     void sourceChanged();
@@ -578,6 +507,7 @@ signals:
     void ratingFilterChanged();
 
 private:
+    AppBackend* m_backend = nullptr;
     QObject* m_source = nullptr;
     bool m_groupBursts = true;
     mutable int m_isLeadRole = -1;
@@ -588,6 +518,9 @@ private:
     QString m_colorLabelFilter;               // "" = show all
     int m_ratingFilter = 0;                   // 0 = show all
     mutable int m_colorLabelRole = -1;
+
+    mutable bool m_cacheValid = false;
+    mutable std::map<int, GroupSummary> m_groupCache;
 };
 
 class FullImageProvider;
@@ -641,6 +574,43 @@ public:
     Q_INVOKABLE void    setPhotoColorLabel(const QString& filePath, const QString& label);
 
     Q_INVOKABLE QString logFilePath() const;
+
+    // Grouping accessors
+    Q_INVOKABLE int groupLead(int row) const {
+        if (row >= 0 && row < static_cast<int>(m_groupLead.size())) {
+            return m_groupLead[row];
+        }
+        return row;
+    }
+
+    Q_INVOKABLE int groupSize(int lead) const {
+        if (lead >= 0 && lead < static_cast<int>(m_groupSize.size())) {
+            return m_groupSize[lead];
+        }
+        return 1;
+    }
+
+    Q_INVOKABLE bool isGroupExpanded(int lead) const {
+        if (lead >= 0 && lead < static_cast<int>(m_isExpanded.size())) {
+            return m_isExpanded[lead];
+        }
+        return false;
+    }
+
+    Q_INVOKABLE float photoScore(int row) const {
+        if (row >= 0 && row < static_cast<int>(m_aestheticScores.size())) {
+            return m_aestheticScores[row];
+        }
+        return 0.0f;
+    }
+
+    Q_INVOKABLE void toggleGroupExpansion(int leadIndex) {
+        if (leadIndex >= 0 && leadIndex < static_cast<int>(m_isExpanded.size())) {
+            m_isExpanded[leadIndex] = !m_isExpanded[leadIndex];
+            m_burstProxy.invalidateFilterOnly();
+            emit groupExpansionChanged();
+        }
+    }
 
     // Fast Viewer Preloading & Progressive Loading
     void setFullImageProvider(FullImageProvider* provider);
@@ -750,6 +720,7 @@ signals:
     void scanFinished();
 
     void histogramUpdated();
+    void groupExpansionChanged();
     void groupAssigned(int index, int leadIndex, bool isLead, int groupSize);
     void bestShotAssigned(int index, bool isBestShot, int leadIndex);
     // Emitted after setPhotoColorLabel so QML can update grid badges live
@@ -772,6 +743,9 @@ private:
     std::thread m_metaThread;   // background XMP read on folder open
     
     std::vector<QString> m_files;
+    std::vector<int> m_groupLead;
+    std::vector<int> m_groupSize;
+    std::vector<bool> m_isExpanded;
 
     // Settings Variables
     int m_themeMode = 0;
